@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { MeshStore } from '../src/store.js'
 import { MeshProtocol } from '../src/protocol.js'
 import { MeshNode } from '../src/node.js'
-import { anchorToSolana } from '../src/anchor.js'
+import { MockAnchorAdapter } from '../src/anchor.js'
 import { DEFAULT_CONFIG } from '../src/types.js'
 import { hashBlob, signData } from '../src/crypto.js'
 import { generateKeyPairSync } from 'node:crypto'
@@ -157,12 +157,12 @@ describe('SEC-02: list() rejects SQL injection in filter inputs', () => {
 // 3. Anchor stub must never run in production
 // ---------------------------------------------------------------------------
 
-describe('SEC-03: anchorToSolana stub is blocked in production', () => {
+describe('SEC-03: MockAnchorAdapter is blocked in production', () => {
   it('throws when NODE_ENV=production', async () => {
     const original = process.env.NODE_ENV
     process.env.NODE_ENV = 'production'
     try {
-      await expect(anchorToSolana('abc123')).rejects.toThrow('not implemented')
+      await expect(new MockAnchorAdapter().submit('a'.repeat(64))).rejects.toThrow('cannot run in production')
     } finally {
       process.env.NODE_ENV = original
     }
@@ -172,9 +172,9 @@ describe('SEC-03: anchorToSolana stub is blocked in production', () => {
     const original = process.env.NODE_ENV
     process.env.NODE_ENV = 'development'
     try {
-      const anchor = await anchorToSolana('abc123')
-      expect(anchor.txHash).toContain('mock_')
-      expect(typeof anchor.slot).toBe('number')
+      const result = await new MockAnchorAdapter().submit('a'.repeat(64))
+      expect(result.txHash).toContain('mock_')
+      expect(typeof result.slot).toBe('number')
     } finally {
       process.env.NODE_ENV = original
     }
