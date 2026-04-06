@@ -104,6 +104,15 @@ export interface MeshNodeConfig {
 
   /** Maximum item size in bytes (default: 10 KB) */
   maxItemSizeBytes: number
+
+  /** Mesh ID — isolates meshes by country/network (default: 'attestto-cr') */
+  meshId: string
+
+  /** Enable relay server (for anchor/bootstrap nodes with public IPs) */
+  enableRelayServer: boolean
+
+  /** Enable relay client (for nodes behind NAT — connects via relay nodes) */
+  enableRelayClient: boolean
 }
 
 export const DEFAULT_CONFIG: MeshNodeConfig = {
@@ -114,6 +123,9 @@ export const DEFAULT_CONFIG: MeshNodeConfig = {
   gcIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
   minHoldersForEviction: 6,
   maxItemSizeBytes: 10 * 1024, // 10 KB
+  meshId: 'attestto-cr',
+  enableRelayServer: false,
+  enableRelayClient: true,
 }
 
 // ---------------------------------------------------------------------------

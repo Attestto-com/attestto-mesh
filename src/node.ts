@@ -19,6 +19,7 @@ import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { bootstrap } from '@libp2p/bootstrap'
 import { identify } from '@libp2p/identify'
 import { ping } from '@libp2p/ping'
+import { circuitRelayTransport, circuitRelayServer } from '@libp2p/circuit-relay-v2'
 import { EventEmitter } from 'node:events'
 import type {
   MeshNodeConfig,
@@ -30,11 +31,14 @@ import type {
 } from './types.js'
 import { DEFAULT_CONFIG } from './types.js'
 
-const GOSSIP_TOPIC = '/attestto/mesh/1.0.0'
+function gossipTopic(meshId: string): string {
+  return `/attestto/mesh/${meshId}/1.0.0`
+}
 
 export class MeshNode extends EventEmitter {
   private node: Libp2p | null = null
   private config: MeshNodeConfig
+  private topic: string
   private startedAt: number = 0
   private _storageMetrics: StorageMetrics = {
     usedBytes: 0,
@@ -46,6 +50,7 @@ export class MeshNode extends EventEmitter {
   constructor(config: Partial<MeshNodeConfig> & { dataDir: string }) {
     super()
     this.config = { ...DEFAULT_CONFIG, ...config }
+    this.topic = gossipTopic(this.config.meshId)
   }
 
   /**
@@ -66,6 +71,11 @@ export class MeshNode extends EventEmitter {
       }),
     }
 
+    // Relay server — for anchor nodes with public IPs that help NAT peers connect
+    if (this.config.enableRelayServer) {
+      services.relay = circuitRelayServer()
+    }
+
     const peerDiscovery: Array<unknown> = []
     if (this.config.bootstrapPeers.length > 0) {
       peerDiscovery.push(
@@ -73,11 +83,17 @@ export class MeshNode extends EventEmitter {
       )
     }
 
+    // Transports: TCP always, relay client for NAT traversal
+    const transports: Array<unknown> = [tcp()]
+    if (this.config.enableRelayClient) {
+      transports.push(circuitRelayTransport())
+    }
+
     this.node = await createLibp2p({
       addresses: {
         listen: [`/ip4/0.0.0.0/tcp/${this.config.listenPort}`],
       },
-      transports: [tcp()],
+      transports: transports as never[],
       connectionEncrypters: [noise()],
       streamMuxers: [yamux()],
       peerDiscovery: peerDiscovery as never[],
@@ -98,9 +114,9 @@ export class MeshNode extends EventEmitter {
     // Subscribe to mesh gossip topic
     const pubsub = this.getPubsub()
     if (pubsub) {
-      pubsub.subscribe(GOSSIP_TOPIC)
+      pubsub.subscribe(this.topic)
       pubsub.addEventListener('message', (evt: { detail: { topic: string; data: Uint8Array } }) => {
-        if (evt.detail.topic !== GOSSIP_TOPIC) return
+        if (evt.detail.topic !== this.topic) return
         try {
           const msg = this.decodeGossipMessage(evt.detail.data)
           this.emit('gossip:message', msg)
@@ -121,7 +137,7 @@ export class MeshNode extends EventEmitter {
     if (!this.node) return
     const pubsub = this.getPubsub()
     if (pubsub) {
-      pubsub.unsubscribe(GOSSIP_TOPIC)
+      pubsub.unsubscribe(this.topic)
     }
     await this.node.stop()
     this.node = null
@@ -135,7 +151,7 @@ export class MeshNode extends EventEmitter {
     const pubsub = this.getPubsub()
     if (!pubsub) throw new Error('Node not started')
     const data = this.encodeGossipMessage(message)
-    await pubsub.publish(GOSSIP_TOPIC, data)
+    await pubsub.publish(this.topic, data)
   }
 
   /**

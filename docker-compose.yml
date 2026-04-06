@@ -1,0 +1,42 @@
+# Two-node mesh demo — run with: docker compose up
+#
+# For cross-machine testing:
+#   Machine A: docker compose up alpha
+#   Machine B: docker run attestto-mesh --role beta --peer /ip4/<MACHINE_A_IP>/tcp/4001/p2p/<PEER_ID>
+
+services:
+  alpha:
+    build: .
+    command: ["--role", "alpha", "--port", "4001"]
+    ports:
+      - "4001:4001"
+    volumes:
+      - alpha-data:/data/mesh
+    networks:
+      - mesh
+
+  beta:
+    build: .
+    command: ["--role", "beta", "--peer", "/ip4/alpha/tcp/4001/p2p/REPLACE_WITH_ALPHA_PEER_ID"]
+    volumes:
+      - beta-data:/data/mesh
+    depends_on:
+      - alpha
+    networks:
+      - mesh
+
+  # Local demo — both nodes in one process
+  demo:
+    build: .
+    profiles: ["demo"]
+    volumes:
+      - demo-data:/data/mesh
+
+volumes:
+  alpha-data:
+  beta-data:
+  demo-data:
+
+networks:
+  mesh:
+    driver: bridge
