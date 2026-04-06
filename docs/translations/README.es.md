@@ -176,19 +176,6 @@ pnpm build         # Salida dual ESM/CJS via tsup
 
 ---
 
-## Hoja de Ruta
-
-| Fase | Hito | Estado |
-|:-----|:-----|:-------|
-| 1 | Libreria core — nodo, almacen, protocolo, resolucion de conflictos, GC | Listo |
-| 2 | Demo multi-nodo (Proof of Logic para Solana Foundation) | Siguiente |
-| 3 | Integracion con Electron desktop (puente IPC al proceso main) | Planeado |
-| 4 | Ancla Solana con transacciones reales (devnet) | Planeado |
-| 5 | NAT traversal + WebRTC para pares detras de firewalls | Planeado |
-| 6 | Resolucion de documentos DID via DHT del mesh | Planeado |
-
----
-
 ## Repositorios Relacionados
 
 | Repositorio | Descripcion |

@@ -176,19 +176,6 @@ pnpm build         # Dual ESM/CJS output via tsup
 
 ---
 
-## Roadmap
-
-| Phase | Milestone | Status |
-|:------|:----------|:-------|
-| 1 | Core library — node, store, protocol, conflict resolution, GC | Done |
-| 2 | Multi-node demo (Proof of Logic for Solana Foundation) | Next |
-| 3 | Electron desktop integration (IPC bridge to main process) | Planned |
-| 4 | Solana anchor with real transactions (devnet) | Planned |
-| 5 | NAT traversal + WebRTC for peers behind firewalls | Planned |
-| 6 | DID document resolution via mesh DHT | Planned |
-
----
-
 ## Related Repositories
 
 | Repository | Description |
