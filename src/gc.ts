@@ -156,9 +156,9 @@ export class MeshGC {
 
       let evictedAny = false
       for (const candidate of candidates) {
-        // Safety rail: never evict if holders < minHolders
-        // TODO: In production, query DHT for holderCount
-        // For now, always allow eviction (demo/dev mode)
+        // Safety rail: never evict if holders < minHolders (DHT-backed count).
+        // On lookup failure estimateHolders() returns a low value so we keep
+        // the blob — losing data is worse than running hot on disk.
         const holderCount = await this.estimateHolders(candidate.contentHash)
         if (holderCount <= this.minHolders) {
           // DO NOT evict — emit pressure alert
@@ -186,14 +186,42 @@ export class MeshGC {
   }
 
   /**
-   * Estimate how many peers hold a given content hash.
+   * Count how many peers hold a given content hash via DHT findProviders.
    *
-   * TODO: Query DHT findProviders in production.
-   * For dev/demo, returns a high number to allow eviction.
+   * ATT-299: Real DHT holder count.
+   *
+   * Conservative failure mode: if the DHT lookup fails, times out, or
+   * returns no providers, we report 0 — the safety rail then refuses to
+   * evict. Losing data is far worse than running over the watermark.
+   *
+   * Early-exits as soon as we've seen `minHolders + 1` distinct peers
+   * (we only need to know "above threshold", not the exact count).
+   *
+   * The local node is counted as 1 holder by default — we hold the blob
+   * we're considering for eviction.
    */
-  private async estimateHolders(_contentHash: string): Promise<number> {
-    // In production: query DHT findProviders
-    // For now: return safe-to-evict value for development
-    return 100
+  private async estimateHolders(contentHash: string): Promise<number> {
+    const TIMEOUT_MS = 5000
+    const target = this.minHolders + 1 // distinct *remote* peers needed
+    const seen = new Set<string>()
+
+    const lookup = (async () => {
+      try {
+        for await (const peerId of this.node.findProviders(contentHash)) {
+          const id = String(peerId)
+          if (!id || id === this.node.peerId) continue
+          seen.add(id)
+          if (seen.size >= target) break
+        }
+      } catch {
+        // Conservative — leave seen as-is, caller treats low count as "do not evict"
+      }
+    })()
+
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, TIMEOUT_MS))
+    await Promise.race([lookup, timeout])
+
+    // +1 for self (we hold the blob locally)
+    return seen.size + 1
   }
 }
