@@ -58,15 +58,13 @@ export class MeshGC {
    */
   async run(): Promise<GCResult> {
     const usageBefore = this.store.getUsage()
-    let ttlPruned = 0
-    let versionsPruned = 0
     let lruPruned = 0
 
     // Phase 1: TTL expired
-    ttlPruned = this.pruneTTL()
+    const ttlPruned = this.pruneTTL()
 
     // Phase 2: Old versions (keep canonical + 1 rollback)
-    versionsPruned = this.pruneOldVersions()
+    const versionsPruned = this.pruneOldVersions()
 
     // Phase 3: LRU eviction under storage pressure
     const usageAfterPhase2 = this.store.getUsage()

@@ -35,6 +35,15 @@ function gossipTopic(meshId: string): string {
   return `/attestto/mesh/${meshId}/1.0.0`
 }
 
+/** Per-peer rate limit: max messages per sliding window */
+const RATE_LIMIT_MAX = 50
+const RATE_LIMIT_WINDOW_MS = 1000
+
+interface PeerRateState {
+  count: number
+  windowStart: number
+}
+
 export class MeshNode extends EventEmitter {
   private node: Libp2p | null = null
   private config: MeshNodeConfig
@@ -46,6 +55,7 @@ export class MeshNode extends EventEmitter {
     itemCount: 0,
     percentage: 0,
   }
+  private peerRates = new Map<string, PeerRateState>()
 
   constructor(config: Partial<MeshNodeConfig> & { dataDir: string }) {
     super()
@@ -91,7 +101,7 @@ export class MeshNode extends EventEmitter {
 
     this.node = await createLibp2p({
       addresses: {
-        listen: [`/ip4/0.0.0.0/tcp/${this.config.listenPort}`],
+        listen: [`/ip4/${this.config.listenAddress}/tcp/${this.config.listenPort}`],
       },
       transports: transports as never[],
       connectionEncrypters: [noise()],
@@ -108,6 +118,7 @@ export class MeshNode extends EventEmitter {
 
     this.node.addEventListener('peer:disconnect', (evt) => {
       const peerId = evt.detail.toString()
+      this.peerRates.delete(peerId)
       this.emitMeshEvent({ type: 'peer:disconnected', peerId })
     })
 
@@ -115,8 +126,16 @@ export class MeshNode extends EventEmitter {
     const pubsub = this.getPubsub()
     if (pubsub) {
       pubsub.subscribe(this.topic)
-      pubsub.addEventListener('message', (evt: { detail: { topic: string; data: Uint8Array } }) => {
+      pubsub.addEventListener('message', (evt: { detail: { topic: string; data: Uint8Array; from?: { toString(): string } } }) => {
         if (evt.detail.topic !== this.topic) return
+
+        // Rate limit per sender peer
+        const senderId = evt.detail.from?.toString() ?? 'unknown'
+        if (!this.checkRateLimit(senderId)) return
+
+        // Reject oversized raw payloads before attempting to decode
+        if (evt.detail.data.length > 12 * 1024) return
+
         try {
           const msg = this.decodeGossipMessage(evt.detail.data)
           this.emit('gossip:message', msg)
@@ -200,7 +219,7 @@ export class MeshNode extends EventEmitter {
     return {
       peerId: this.node.peerId.toString(),
       peerCount: peers.length,
-      dhtReady: true,
+      dhtReady: peers.length > 0,
       uptimeMs: Date.now() - this.startedAt,
       storage: this._storageMetrics,
       level: this.calculateLevel(peers.length),
@@ -243,13 +262,21 @@ export class MeshNode extends EventEmitter {
   // Private helpers
   // -------------------------------------------------------------------------
 
-  private getPubsub(): { subscribe: Function; unsubscribe: Function; publish: Function; addEventListener: Function } | null {
+  private getPubsub(): {
+    subscribe: (topic: string) => void
+    unsubscribe: (topic: string) => void
+    publish: (topic: string, data: Uint8Array) => Promise<void>
+    addEventListener: (event: string, handler: (evt: unknown) => void) => void
+  } | null {
     if (!this.node) return null
     const services = (this.node as unknown as { services: Record<string, unknown> }).services
     return services?.pubsub as never ?? null
   }
 
-  private getDHT(): { put: Function; get: Function } | null {
+  private getDHT(): {
+    put: (key: Uint8Array, value: Uint8Array) => Promise<void>
+    get: (key: Uint8Array) => AsyncIterable<{ name: string; value?: Uint8Array }>
+  } | null {
     if (!this.node) return null
     const services = (this.node as unknown as { services: Record<string, unknown> }).services
     return services?.dht as never ?? null
@@ -264,6 +291,18 @@ export class MeshNode extends EventEmitter {
 
   private emitMeshEvent(event: MeshEvent): void {
     this.emit('mesh:event', event)
+  }
+
+  private checkRateLimit(peerId: string): boolean {
+    const now = Date.now()
+    const state = this.peerRates.get(peerId)
+    if (!state || now - state.windowStart > RATE_LIMIT_WINDOW_MS) {
+      this.peerRates.set(peerId, { count: 1, windowStart: now })
+      return true
+    }
+    if (state.count >= RATE_LIMIT_MAX) return false
+    state.count++
+    return true
   }
 
   private encodeGossipMessage(msg: GossipMessage): Uint8Array {

@@ -123,8 +123,8 @@ export class MeshProtocol {
       timestamp: Date.now(),
     }
 
-    // Delete locally
-    this.store.deleteByDid(didOwner)
+    // Delete locally (authorized — caller holds the private key)
+    this.applyLocalTombstone(didOwner)
 
     // Propagate to network
     await this.node.publish(msg)
@@ -182,8 +182,20 @@ export class MeshProtocol {
   }
 
   private handleTombstone(msg: GossipTombstoneMessage): void {
-    // TODO: Verify tombstone signature against DID document
-    const deleted = this.store.deleteByDid(msg.didOwner)
+    // SECURITY: Tombstone signature MUST be verified against the DID document
+    // before deleting any data. Until DID resolution is wired in, tombstones
+    // from remote peers are rejected entirely to prevent unauthorized data
+    // destruction. Only local tombstones (via tombstone()) are trusted.
+    void msg
+    return
+  }
+
+  /**
+   * Execute a tombstone locally — called only by the owning node with a
+   * verified signature from its own keypair. NOT triggered by gossip.
+   */
+  private applyLocalTombstone(didOwner: string): void {
+    const deleted = this.store.deleteByDid(didOwner)
     if (deleted > 0) {
       this.node.updateStorageMetrics(this.store.getUsage())
     }

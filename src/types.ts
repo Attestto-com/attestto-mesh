@@ -96,6 +96,14 @@ export interface MeshNodeConfig {
   /** TCP listen port (0 = random) */
   listenPort: number
 
+  /**
+   * TCP listen address.
+   * Use '0.0.0.0' for anchor/relay nodes with a public IP.
+   * Use '127.0.0.1' for desktop nodes that rely on circuit relay for NAT traversal
+   * and should not be directly reachable from the LAN.
+   */
+  listenAddress: string
+
   /** GC interval in ms (default: 6 hours) */
   gcIntervalMs: number
 
@@ -120,6 +128,7 @@ export const DEFAULT_CONFIG: MeshNodeConfig = {
   maxStorageBytes: 250 * 1024 * 1024, // 250 MB
   bootstrapPeers: [],
   listenPort: 0,
+  listenAddress: '127.0.0.1',
   gcIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
   minHoldersForEviction: 6,
   maxItemSizeBytes: 10 * 1024, // 10 KB

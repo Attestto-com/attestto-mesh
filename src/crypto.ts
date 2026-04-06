@@ -53,15 +53,19 @@ export async function signData(
   privateKey: Uint8Array
 ): Promise<string> {
   const { sign, createPrivateKey } = await import('node:crypto')
-  const keyObject = createPrivateKey({
-    key: Buffer.concat([
-      // Ed25519 PKCS8 prefix
-      Buffer.from('302e020100300506032b657004220420', 'hex'),
-      privateKey,
-    ]),
-    format: 'der',
-    type: 'pkcs8',
-  })
+  // Build PKCS8 DER in a local buffer and zero it immediately after the
+  // KeyObject is created — prevents the raw key material from sitting in
+  // the heap for the lifetime of the process.
+  const der = Buffer.concat([
+    Buffer.from('302e020100300506032b657004220420', 'hex'),
+    privateKey,
+  ])
+  let keyObject
+  try {
+    keyObject = createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })
+  } finally {
+    der.fill(0)
+  }
   const sig = sign(null, data, keyObject)
   return sig.toString('hex')
 }

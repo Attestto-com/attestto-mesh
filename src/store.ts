@@ -189,8 +189,14 @@ export class MeshStore {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-    const order = filter?.orderByAccess ? `ORDER BY last_accessed_at ${filter.orderByAccess.toUpperCase()}` : ''
-    const limit = filter?.limit ? `LIMIT ${filter.limit}` : ''
+
+    // Whitelist order direction — never interpolate user input directly
+    const orderDir = filter?.orderByAccess === 'asc' ? 'ASC' : filter?.orderByAccess === 'desc' ? 'DESC' : null
+    const order = orderDir ? `ORDER BY last_accessed_at ${orderDir}` : ''
+
+    // Validate limit is a safe positive integer before interpolating
+    const limitVal = filter?.limit !== undefined ? Math.max(1, Math.floor(Number(filter.limit))) : null
+    const limit = limitVal !== null && Number.isFinite(limitVal) ? `LIMIT ${limitVal}` : ''
 
     const sql = `SELECT * FROM items ${where} ${order} ${limit}`
     const rows = this.db.prepare(sql).all(params) as ItemRow[]

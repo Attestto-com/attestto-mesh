@@ -36,10 +36,19 @@ export async function anchorToSolana(
   //
   // Cost: ~$0.00025 per anchor
 
-  // For development/testing: return a mock anchor
+  // Guard: mock anchor must never run in production — fake tx hashes would
+  // be stored as real proofs and silently break all verification.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'anchorToSolana is not implemented. Cannot anchor in production until ' +
+      'the real Solana memo transaction is wired in.'
+    )
+  }
+
+  // Development/testing only
   return {
     txHash: `mock_${contentHash.slice(0, 16)}_${Date.now()}`,
-    slot: Math.floor(Date.now() / 400), // Approximate Solana slot
+    slot: Math.floor(Date.now() / 400),
     timestamp: Date.now(),
   }
 }
