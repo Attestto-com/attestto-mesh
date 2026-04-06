@@ -1,3 +1,7 @@
+**[English](./TECHNICAL.md)** | [Espanol](./docs/translations/TECHNICAL.es.md)
+
+---
+
 # Technical Reference
 
 > This document is for developers, protocol engineers, and security auditors. For an executive overview, see the [README](./README.md).

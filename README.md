@@ -1,3 +1,7 @@
+**[English](./README.md)** | [Espanol](./docs/translations/README.es.md)
+
+---
+
 # Attestto Mesh
 
 **Public Digital Infrastructure for Sovereign Identity**
