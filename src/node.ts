@@ -126,18 +126,19 @@ export class MeshNode extends EventEmitter {
     const pubsub = this.getPubsub()
     if (pubsub) {
       pubsub.subscribe(this.topic)
-      pubsub.addEventListener('message', (evt: { detail: { topic: string; data: Uint8Array; from?: { toString(): string } } }) => {
-        if (evt.detail.topic !== this.topic) return
+      pubsub.addEventListener('message', (evt: unknown) => {
+        const e = evt as { detail: { topic: string; data: Uint8Array; from?: { toString(): string } } }
+        if (e.detail.topic !== this.topic) return
 
         // Rate limit per sender peer
-        const senderId = evt.detail.from?.toString() ?? 'unknown'
+        const senderId = e.detail.from?.toString() ?? 'unknown'
         if (!this.checkRateLimit(senderId)) return
 
         // Reject oversized raw payloads before attempting to decode
-        if (evt.detail.data.length > 12 * 1024) return
+        if (e.detail.data.length > 12 * 1024) return
 
         try {
-          const msg = this.decodeGossipMessage(evt.detail.data)
+          const msg = this.decodeGossipMessage(e.detail.data)
           this.emit('gossip:message', msg)
         } catch {
           // Malformed message — ignore
