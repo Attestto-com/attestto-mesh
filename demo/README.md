@@ -1,3 +1,7 @@
+**[English](./README.md)** | [Espanol](./README.es.md)
+
+---
+
 # Proof of Logic Demo
 
 Validates all mesh primitives end-to-end in under 30 seconds.

@@ -27,10 +27,10 @@ Thank you for helping translate Attestto Mesh documentation.
 
 ## Current Translations
 
-| Language | Code | README | TECHNICAL | Translator |
-|:---------|:-----|:------:|:---------:|:-----------|
-| English | `en` | [README.md](../../README.md) | [TECHNICAL.md](../../TECHNICAL.md) | Core team |
-| Espanol | `es` | [README.es.md](./README.es.md) | [TECHNICAL.es.md](./TECHNICAL.es.md) | Core team |
+| Language | Code | README | TECHNICAL | Demo | Translator |
+|:---------|:-----|:------:|:---------:|:----:|:-----------|
+| English | `en` | [README.md](../../README.md) | [TECHNICAL.md](../../TECHNICAL.md) | [demo/README.md](../../demo/README.md) | Core team |
+| Espanol | `es` | [README.es.md](./README.es.md) | [TECHNICAL.es.md](./TECHNICAL.es.md) | [demo/README.es.md](../../demo/README.es.md) | Core team |
 
 ## Questions?
 
