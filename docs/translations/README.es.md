@@ -146,6 +146,33 @@ const contentHash = await protocol.put({
 const result = await protocol.get('did:sns:maria.sol', 'credentials/licencia-conducir')
 ```
 
+**Ejemplo de verificador** — un banco verificando la credencial de un cliente:
+
+```typescript
+// El banco quiere verificar la licencia de conducir de Maria
+const credential = await protocol.get('did:sns:maria.sol', 'credentials/licencia-conducir')
+
+if (credential) {
+  // Verificar que el blob no fue manipulado
+  const hashValido = hashBlob(credential.blob) === credential.metadata.contentHash
+
+  // Verificar que la credencial fue firmada por el DID de Maria
+  const firmaValida = await verifySignature(
+    credential.blob,
+    credential.metadata.signature,
+    llavePublicaMaria
+  )
+
+  // Verificar si esta anclado en Solana (garantia mas fuerte)
+  const anclado = credential.metadata.solanaAnchor !== null
+
+  console.log({ hashValido, firmaValida, anclado })
+  // → { hashValido: true, firmaValida: true, anclado: true }
+}
+```
+
+Sin API keys. Sin crear cuenta. Sin servidor que llamar. El banco resuelve la credencial de Maria directamente desde el mesh, verifica la matematica, y toma una decision — en menos de 100ms.
+
 ### Estructura del Proyecto
 
 ```

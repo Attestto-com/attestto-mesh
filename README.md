@@ -146,6 +146,33 @@ const contentHash = await protocol.put({
 const result = await protocol.get('did:sns:maria.sol', 'credentials/drivers-license')
 ```
 
+**Verifier example** — a bank verifying a customer's credential:
+
+```typescript
+// Bank wants to verify Maria's driver's license
+const credential = await protocol.get('did:sns:maria.sol', 'credentials/drivers-license')
+
+if (credential) {
+  // Verify the blob hasn't been tampered with
+  const hashValid = hashBlob(credential.blob) === credential.metadata.contentHash
+
+  // Verify the credential was signed by Maria's DID
+  const sigValid = await verifySignature(
+    credential.blob,
+    credential.metadata.signature,
+    mariaPublicKey
+  )
+
+  // Check if anchored on Solana (strongest guarantee)
+  const anchored = credential.metadata.solanaAnchor !== null
+
+  console.log({ hashValid, sigValid, anchored })
+  // → { hashValid: true, sigValid: true, anchored: true }
+}
+```
+
+No API keys. No account creation. No server to call. The bank resolves Maria's credential directly from the mesh, verifies the math, and makes a decision — in under 100ms.
+
 ### Project Structure
 
 ```
