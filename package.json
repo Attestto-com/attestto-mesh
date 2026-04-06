@@ -1,7 +1,7 @@
 {
   "name": "@attestto/mesh",
   "version": "0.1.0",
-  "description": "Distributed application data mesh over libp2p — encrypted P2P storage for sovereign identity state",
+  "description": "Public Digital Infrastructure — distributed P2P mesh for sovereign identity state over libp2p, anchored on Solana",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.cjs",
@@ -60,12 +60,21 @@
     ]
   },
   "keywords": [
+    "public-digital-infrastructure",
+    "pdi",
+    "sovereign-identity",
+    "decentralized-identity",
+    "did",
+    "verifiable-credentials",
     "libp2p",
     "mesh",
-    "distributed",
-    "identity",
-    "did",
-    "sovereign",
-    "p2p"
+    "p2p",
+    "distributed-systems",
+    "solana",
+    "web5",
+    "dht",
+    "gossipsub",
+    "blind-courier",
+    "national-resilience"
   ]
 }
