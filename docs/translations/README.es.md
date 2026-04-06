@@ -201,6 +201,58 @@ pnpm type-check    # TypeScript modo estricto
 pnpm build         # Salida dual ESM/CJS via tsup
 ```
 
+### Ejecutar el Demo
+
+El demo Proof of Logic valida todas las primitivas del mesh de extremo a extremo: descubrimiento de pares, sincronizacion de datos, resolucion de conflictos, recoleccion de basura, y revocacion de DID.
+
+**Demo rapido — velo funcionar en 15 segundos:**
+
+```bash
+pnpm demo
+```
+
+Levanta dos nodos mesh en un solo proceso. Ambos se descubren, sincronizan una credencial, resuelven un conflicto de version via ancla Solana, podan 20 versiones a 2, expiran un mensaje TTL, y propagan un tombstone de DID. Sin configuracion necesaria.
+
+**Dos maquinas en la misma red — probar que funciona entre hardware real:**
+
+```bash
+# Tu maquina
+pnpm demo:alpha
+
+# Maquina de un colega (usar el multiaddr que imprime alpha)
+pnpm demo:beta --peer /ip4/192.168.1.X/tcp/4001/p2p/12D3Koo...
+```
+
+Alpha arranca un nodo e imprime su direccion. Beta se conecta y ambos intercambian datos por TCP. Valida que el mesh funciona entre maquinas independientes, no solo en proceso.
+
+**Docker — cero dependencias locales, cualquiera puede ejecutarlo:**
+
+```bash
+# Demo rapido (no necesita Node.js, solo Docker)
+docker build -t attestto-mesh . && docker run attestto-mesh
+
+# Dos contenedores comunicandose
+docker compose up
+```
+
+Para revisores, auditores, o evaluadores de grants que quieran verificar el protocolo sin instalar Node.js, pnpm, o cualquier toolchain. Construir la imagen una vez, ejecutarla en cualquier lugar.
+
+---
+
+## Aislamiento de Mesh Multi-Pais
+
+La configuracion `meshId` aisla los meshes por pais. Mismo protocolo, redes diferentes — los datos de un pais nunca se filtran a otro.
+
+```typescript
+// Costa Rica
+new MeshNode({ meshId: 'attestto-cr', dataDir: '/data/mesh' })
+
+// Panama
+new MeshNode({ meshId: 'attestto-pa', dataDir: '/data/mesh' })
+```
+
+Cada mesh ID crea un topic de gossip separado (`/attestto/mesh/{meshId}/1.0.0`). Los nodos solo descubren y sincronizan con pares en el mismo mesh. Un solo codebase sirve a cualquier pais que adopte la infraestructura.
+
 ---
 
 ## Repositorios Relacionados

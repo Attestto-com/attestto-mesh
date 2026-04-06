@@ -201,6 +201,58 @@ pnpm type-check    # TypeScript strict mode
 pnpm build         # Dual ESM/CJS output via tsup
 ```
 
+### Running the Demo
+
+The Proof of Logic demo validates all mesh primitives end-to-end: peer discovery, data sync, conflict resolution, garbage collection, and DID revocation.
+
+**Quick demo — see it work in 15 seconds:**
+
+```bash
+pnpm demo
+```
+
+Spins up two mesh nodes in a single process. Both discover each other, sync a credential, resolve a version conflict via Solana anchor, prune 20 versions down to 2, expire a TTL message, and propagate a DID tombstone. No configuration needed.
+
+**Two machines on the same network — prove it works across real hardware:**
+
+```bash
+# Your machine
+pnpm demo:alpha
+
+# Colleague's machine (use the multiaddr printed by alpha)
+pnpm demo:beta --peer /ip4/192.168.1.X/tcp/4001/p2p/12D3Koo...
+```
+
+Alpha starts a node and prints its address. Beta connects and the two exchange data over TCP. Validates that the mesh works between independent machines, not just in-process.
+
+**Docker — zero local dependencies, anyone can run it:**
+
+```bash
+# Quick demo (no Node.js required, just Docker)
+docker build -t attestto-mesh . && docker run attestto-mesh
+
+# Two containers talking to each other
+docker compose up
+```
+
+For reviewers, auditors, or grant evaluators who want to verify the protocol without installing Node.js, pnpm, or any toolchain. Build the image once, run it anywhere.
+
+---
+
+## Multi-Country Mesh Isolation
+
+The `meshId` configuration isolates meshes by country. Same protocol, different networks — data from one country never leaks into another.
+
+```typescript
+// Costa Rica
+new MeshNode({ meshId: 'attestto-cr', dataDir: '/data/mesh' })
+
+// Panama
+new MeshNode({ meshId: 'attestto-pa', dataDir: '/data/mesh' })
+```
+
+Each mesh ID creates a separate gossip topic (`/attestto/mesh/{meshId}/1.0.0`). Nodes only discover and sync with peers on the same mesh. A single codebase serves any country that adopts the infrastructure.
+
 ---
 
 ## Related Repositories
