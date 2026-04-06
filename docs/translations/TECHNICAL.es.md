@@ -64,23 +64,41 @@ CREATE TABLE items (
 
 #### Flujo PUT
 
-```
-1. El llamador proporciona: blob + metadata (didOwner, path, version, signature)
-2. contentHash = SHA-256(blob)
-3. Almacenar localmente (cache L1)
-4. DHT.put(key, contentHash) — registrar en tabla hash distribuida
-5. GossipSub.publish(metadata + blob) — propagar a pares
+```mermaid
+sequenceDiagram
+    participant Caller as Llamador
+    participant Local as Almacen Local (L1)
+    participant DHT as Kademlia DHT
+    participant Gossip as GossipSub
+
+    Caller->>Local: blob + metadata (didOwner, path, version, signature)
+    Local->>Local: contentHash = SHA-256(blob)
+    Local->>Local: Almacenar localmente (cache L1)
+    Local->>DHT: DHT.put(key, contentHash)
+    Local->>Gossip: publish(metadata + blob) a pares
 ```
 
 #### Flujo GET
 
-```
-1. Verificar L1 (almacen local) — 0ms si esta en cache
-2. Consultar DHT por contentHash usando la clave — <100ms
-3. Obtener blob del par proveedor — dependiente de la red
-4. Verificar: SHA-256(blob) === contentHash
-5. Verificar: firma Ed25519 corresponde a la llave publica del DID
-6. Almacenar localmente para futuros hits L1
+```mermaid
+sequenceDiagram
+    participant Client as Cliente
+    participant L1 as Almacen Local (L1)
+    participant DHT as Kademlia DHT
+    participant Peer as Par Remoto
+
+    Client->>L1: Verificar cache local
+    alt Cache hit
+        L1-->>Client: Retornar blob (0ms)
+    else Cache miss
+        Client->>DHT: Consultar contentHash por clave (<100ms)
+        DHT-->>Client: contentHash + info del proveedor
+        Client->>Peer: Obtener blob del proveedor
+        Peer-->>Client: Blob cifrado
+        Client->>Client: Verificar SHA-256(blob) === contentHash
+        Client->>Client: Verificar firma Ed25519 del DID
+        Client->>L1: Almacenar localmente para futuros hits L1
+    end
 ```
 
 #### Regla de Aceptacion de Versiones
@@ -94,11 +112,16 @@ Una nueva version se acepta solo si:
 
 Cuando dos pares no estan de acuerdo sobre la version canonica, los conflictos se resuelven deterministicamente:
 
-```
-Prioridad 1: Ancla Solana — la version con slot mas reciente gana
-Prioridad 2: Numero de version — la version mas alta gana
-Prioridad 3: Timestamp de creacion — el mas reciente gana
-Prioridad 4: Hash del contenido — el lexicograficamente mayor gana (desempate deterministico)
+```mermaid
+flowchart TD
+    Start["Dos pares no concuerdan<br/>en la version canonica"] --> P1{Ambos tienen<br/>ancla Solana?}
+    P1 -- "Si" --> A1["Slot mas reciente gana"]
+    P1 -- "Uno anclado" --> A2["La version anclada gana"]
+    P1 -- "Ninguno" --> P2{Diferente numero<br/>de version?}
+    P2 -- "Si" --> A3["Version mas alta gana"]
+    P2 -- "No" --> P3{Diferente<br/>timestamp?}
+    P3 -- "Si" --> A4["Timestamp mas reciente gana"]
+    P3 -- "No" --> P4["Hash lexicograficamente<br/>mayor gana<br/>(desempate deterministico)"]
 ```
 
 Una version anclada siempre gana sobre una sin anclar. Esto incentiva anclar cambios de estado criticos.

@@ -64,23 +64,41 @@ CREATE TABLE items (
 
 #### PUT Flow
 
-```
-1. Caller provides: blob + metadata (didOwner, path, version, signature)
-2. contentHash = SHA-256(blob)
-3. Store locally (L1 cache)
-4. DHT.put(key, contentHash) — register in distributed hash table
-5. GossipSub.publish(metadata + blob) — propagate to peers
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Local as Local Store (L1)
+    participant DHT as Kademlia DHT
+    participant Gossip as GossipSub
+
+    Caller->>Local: blob + metadata (didOwner, path, version, signature)
+    Local->>Local: contentHash = SHA-256(blob)
+    Local->>Local: Store locally (L1 cache)
+    Local->>DHT: DHT.put(key, contentHash)
+    Local->>Gossip: publish(metadata + blob) to peers
 ```
 
 #### GET Flow
 
-```
-1. Check L1 (local store) — 0ms if cached
-2. Query DHT for contentHash by key — <100ms
-3. Fetch blob from providing peer — network dependent
-4. Verify: SHA-256(blob) === contentHash
-5. Verify: Ed25519 signature matches DID owner's public key
-6. Store locally for future L1 hits
+```mermaid
+sequenceDiagram
+    participant Client
+    participant L1 as Local Store (L1)
+    participant DHT as Kademlia DHT
+    participant Peer as Remote Peer
+
+    Client->>L1: Check local cache
+    alt Cache hit
+        L1-->>Client: Return blob (0ms)
+    else Cache miss
+        Client->>DHT: Query contentHash by key (<100ms)
+        DHT-->>Client: contentHash + provider info
+        Client->>Peer: Fetch blob from provider
+        Peer-->>Client: Encrypted blob
+        Client->>Client: Verify SHA-256(blob) === contentHash
+        Client->>Client: Verify Ed25519 signature matches DID owner
+        Client->>L1: Store locally for future L1 hits
+    end
 ```
 
 #### Version Acceptance Rule
@@ -94,11 +112,16 @@ A new version is accepted only if:
 
 When two peers disagree about the canonical version, conflicts are resolved deterministically:
 
-```
-Priority 1: Solana anchor — version with more recent slot wins
-Priority 2: Version number — higher version wins
-Priority 3: Creation timestamp — more recent wins
-Priority 4: Content hash — lexicographically higher wins (deterministic tiebreak)
+```mermaid
+flowchart TD
+    Start["Two peers disagree on canonical version"] --> P1{Both have<br/>Solana anchor?}
+    P1 -- "Yes" --> A1["More recent slot wins"]
+    P1 -- "One anchored" --> A2["Anchored version wins"]
+    P1 -- "Neither" --> P2{Different<br/>version number?}
+    P2 -- "Yes" --> A3["Higher version wins"]
+    P2 -- "No" --> P3{Different<br/>timestamp?}
+    P3 -- "Yes" --> A4["More recent timestamp wins"]
+    P3 -- "No" --> P4["Lexicographically higher<br/>content hash wins<br/>(deterministic tiebreak)"]
 ```
 
 An anchored version always beats an unanchored one. This incentivizes anchoring critical state changes.

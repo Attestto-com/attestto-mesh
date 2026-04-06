@@ -37,14 +37,23 @@ Attestto Mesh removes that single point of failure. Identity data is encrypted, 
 
 ## How It Works
 
-```
-Citizen's Device                     The Mesh                        Solana
-┌──────────────┐            ┌─────────────────────┐         ┌──────────────────┐
-│  Private Vault │           │  Encrypted State     │         │  Public Anchor    │
-│  (keys, prefs) │           │  (VCs, proofs, msgs) │         │  (timestamps,     │
-│  Never leaves  │──PUT────▶│  Replicated across   │──anchor▶│   hash proofs)    │
-│  the device    │◀──GET────│  50+ peers via gossip │         │  $0.00025 / tx    │
-└──────────────┘            └─────────────────────┘         └──────────────────┘
+```mermaid
+graph LR
+    subgraph Device["Citizen's Device"]
+        Vault["Private Vault<br/>(keys, prefs)<br/>Never leaves the device"]
+    end
+
+    subgraph Mesh["The Mesh"]
+        State["Encrypted State<br/>(VCs, proofs, msgs)<br/>Replicated across<br/>50+ peers via gossip"]
+    end
+
+    subgraph Solana["Solana"]
+        Anchor["Public Anchor<br/>(timestamps, hash proofs)<br/>$0.00025 / tx"]
+    end
+
+    Vault -- "PUT" --> State
+    State -- "GET" --> Vault
+    State -- "anchor" --> Anchor
 ```
 
 **Three layers of resolution:**

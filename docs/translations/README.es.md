@@ -37,14 +37,23 @@ Attestto Mesh elimina ese punto unico de falla. Los datos de identidad se cifran
 
 ## Como Funciona
 
-```
-Dispositivo del Ciudadano            El Mesh                          Solana
-┌──────────────────┐          ┌───────────────────────┐       ┌──────────────────┐
-│  Boveda Privada   │          │  Estado Cifrado        │       │  Ancla Publica    │
-│  (llaves, prefs)  │          │  (VCs, pruebas, msgs)  │       │  (timestamps,     │
-│  Nunca sale del   │──PUT───▶│  Replicado en 50+      │─ancla▶│   pruebas hash)   │
-│  dispositivo      │◀──GET───│  pares via gossip      │       │  $0.00025 / tx    │
-└──────────────────┘          └───────────────────────┘       └──────────────────┘
+```mermaid
+graph LR
+    subgraph Device["Dispositivo del Ciudadano"]
+        Vault["Boveda Privada<br/>(llaves, prefs)<br/>Nunca sale del dispositivo"]
+    end
+
+    subgraph Mesh["El Mesh"]
+        State["Estado Cifrado<br/>(VCs, pruebas, msgs)<br/>Replicado en 50+<br/>pares via gossip"]
+    end
+
+    subgraph Sol["Solana"]
+        Anchor["Ancla Publica<br/>(timestamps, pruebas hash)<br/>$0.00025 / tx"]
+    end
+
+    Vault -- "PUT" --> State
+    State -- "GET" --> Vault
+    State -- "ancla" --> Anchor
 ```
 
 **Tres capas de resolucion:**
