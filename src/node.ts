@@ -18,6 +18,7 @@ import { kadDHT } from '@libp2p/kad-dht'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { bootstrap } from '@libp2p/bootstrap'
 import { identify } from '@libp2p/identify'
+import { ping } from '@libp2p/ping'
 import { EventEmitter } from 'node:events'
 import type {
   MeshNodeConfig,
@@ -55,6 +56,7 @@ export class MeshNode extends EventEmitter {
 
     const services: Record<string, unknown> = {
       identify: identify(),
+      ping: ping(),
       dht: kadDHT({
         clientMode: false,
       }),

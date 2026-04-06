@@ -24,7 +24,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "demo": "tsx demo/proof-of-logic.ts",
+    "demo:alpha": "tsx demo/proof-of-logic.ts --role alpha --port 4001",
+    "demo:beta": "tsx demo/proof-of-logic.ts --role beta"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
@@ -33,6 +36,7 @@
     "@libp2p/bootstrap": "^12.0.15",
     "@libp2p/identify": "^4.0.14",
     "@libp2p/kad-dht": "^16.1.7",
+    "@libp2p/ping": "^3.0.14",
     "@libp2p/tcp": "^11.0.14",
     "better-sqlite3": "^11.8.1",
     "libp2p": "^3.1.7",
@@ -43,6 +47,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "tsup": "^8.3.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.7.0",
     "vitest": "^2.1.0"
   },
