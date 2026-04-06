@@ -26,6 +26,13 @@ export class MeshProtocol {
     this.node.on('gossip:message', (msg: GossipMessage) => {
       this.handleGossipMessage(msg)
     })
+
+    // Serve direct fetch requests from local store (Cartero Ciego —
+    // we hand over only the encrypted blob we already hold).
+    // Guard for tests that mock MeshNode without the fetch surface.
+    if (typeof this.node.setFetchHandler === 'function') {
+      this.node.setFetchHandler((contentHash) => this.store.get(contentHash))
+    }
   }
 
   /**
@@ -58,6 +65,10 @@ export class MeshProtocol {
       version: metadata.version,
     }))
     await this.node.dhtPut(new TextEncoder().encode(key), dhtValue)
+
+    // Announce in DHT that this node provides the content blob (best-effort —
+    // peers use findProviders(contentHash) to discover us via fetchFromPeer).
+    await this.node.provideContent(contentHash).catch(() => { /* best-effort */ })
 
     // Gossip the full item to peers
     const gossipMsg: GossipPutMessage = {
@@ -103,8 +114,31 @@ export class MeshProtocol {
       const byHash = this.store.get(contentHash)
       if (byHash) return byHash
 
-      // TODO: L2/L3 — fetch from peer that provides the content hash
-      // For now, return null if not in local store
+      // L3: Find peers advertising this content hash and fetch directly.
+      // Try providers in DHT order; stop at first peer returning a verified blob.
+      for await (const peerId of this.node.findProviders(contentHash)) {
+        const fetched = await this.node.fetchFromPeer(peerId, contentHash)
+        if (!fetched) continue
+
+        // SECURITY: never trust the peer — re-hash and cross-check metadata.
+        if (hashBlob(fetched.blob) !== contentHash) continue
+        if (fetched.metadata.contentHash !== contentHash) continue
+        if (fetched.metadata.didOwner !== didOwner || fetched.metadata.path !== path) continue
+
+        // Cache locally so subsequent reads hit L1
+        const stored = this.store.put(fetched.metadata, fetched.blob)
+        if (stored) {
+          this.node.updateStorageMetrics(this.store.getUsage())
+          this.node.emit('mesh:event', {
+            type: 'item:received',
+            contentHash,
+            didOwner,
+            path,
+          })
+        }
+        return fetched
+      }
+
       return null
     } catch {
       return null

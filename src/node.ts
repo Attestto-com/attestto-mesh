@@ -21,6 +21,10 @@ import { identify } from '@libp2p/identify'
 import { ping } from '@libp2p/ping'
 import { circuitRelayTransport, circuitRelayServer } from '@libp2p/circuit-relay-v2'
 import { EventEmitter } from 'node:events'
+import { CID } from 'multiformats/cid'
+import * as Digest from 'multiformats/hashes/digest'
+import * as raw from 'multiformats/codecs/raw'
+import { concat as uint8Concat } from 'uint8arrays/concat'
 import type {
   MeshNodeConfig,
   MeshNodeStatus,
@@ -28,8 +32,42 @@ import type {
   NodeLevel,
   StorageMetrics,
   GossipMessage,
+  MeshItem,
+  MeshItemMetadata,
 } from './types.js'
 import { DEFAULT_CONFIG } from './types.js'
+
+/** libp2p protocol id for direct blob fetch by content hash */
+const FETCH_PROTOCOL = '/attestto/mesh/fetch/1.0.0'
+
+/** SHA-256 multihash code */
+const SHA256_CODE = 0x12
+
+/** Max blob fetch payload (envelope) — guard against malicious peers */
+const MAX_FETCH_BYTES = 64 * 1024
+
+/**
+ * Minimal libp2p stream surface — avoids importing the (unstable) interface
+ * package while keeping dialProtocol/handle handlers strongly typed enough.
+ */
+interface LibStream {
+  source: AsyncIterable<Uint8Array | { subarray: () => Uint8Array }>
+  sink: (source: AsyncIterable<Uint8Array>) => Promise<void>
+  close?: () => Promise<void>
+}
+
+/** Read all bytes from a libp2p stream up to maxBytes; returns null on overflow. */
+async function readStreamCapped(stream: LibStream, maxBytes: number): Promise<Uint8Array | null> {
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for await (const chunk of stream.source) {
+    const u8 = chunk instanceof Uint8Array ? chunk : chunk.subarray()
+    total += u8.length
+    if (total > maxBytes) return null
+    chunks.push(u8)
+  }
+  return uint8Concat(chunks, total)
+}
 
 function gossipTopic(meshId: string): string {
   return `/attestto/mesh/${meshId}/1.0.0`
@@ -56,6 +94,7 @@ export class MeshNode extends EventEmitter {
     percentage: 0,
   }
   private peerRates = new Map<string, PeerRateState>()
+  private fetchHandler: ((contentHash: string) => MeshItem | null) | null = null
 
   constructor(config: Partial<MeshNodeConfig> & { dataDir: string }) {
     super()
@@ -146,8 +185,156 @@ export class MeshNode extends EventEmitter {
       })
     }
 
+    // Register direct blob fetch protocol — peers ask us for a contentHash,
+    // we serve from local store (only items we already hold).
+    await (this.node as unknown as {
+      handle: (
+        protocol: string,
+        handler: (info: { stream: LibStream }) => void | Promise<void>
+      ) => Promise<void>
+    }).handle(FETCH_PROTOCOL, ({ stream }) => {
+      void this.serveFetchStream(stream)
+    })
+
     await this.node.start()
     this.startedAt = Date.now()
+  }
+
+  /**
+   * Register a handler that resolves a contentHash to a local MeshItem.
+   * Called by MeshProtocol so the node can serve fetch requests from peers.
+   */
+  setFetchHandler(fn: (contentHash: string) => MeshItem | null): void {
+    this.fetchHandler = fn
+  }
+
+  /**
+   * Announce to the DHT that this node provides the given content hash.
+   * Best-effort — silently ignores failures (no peers, DHT not ready, etc.).
+   */
+  async provideContent(contentHash: string): Promise<void> {
+    const dht = this.getDHT() as unknown as {
+      provide?: (cid: CID) => AsyncIterable<unknown>
+    } | null
+    if (!dht || typeof dht.provide !== 'function') return
+    try {
+      const cid = this.contentHashToCid(contentHash)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _evt of dht.provide(cid)) { /* drain provide events */ }
+    } catch {
+      // best-effort
+    }
+  }
+
+  /**
+   * Find peers in the DHT that advertise the given content hash.
+   * Yields opaque peer-id objects suitable for fetchFromPeer().
+   */
+  async *findProviders(contentHash: string): AsyncGenerator<unknown> {
+    const dht = this.getDHT() as unknown as {
+      findProviders?: (cid: CID) => AsyncIterable<{
+        name: string
+        providers?: Array<{ id: unknown }>
+      }>
+    } | null
+    if (!dht || typeof dht.findProviders !== 'function') return
+    let cid: CID
+    try {
+      cid = this.contentHashToCid(contentHash)
+    } catch {
+      return
+    }
+    try {
+      for await (const event of dht.findProviders(cid)) {
+        if (event.name === 'PROVIDER' && Array.isArray(event.providers)) {
+          for (const p of event.providers) {
+            if (p && p.id) yield p.id
+          }
+        }
+      }
+    } catch {
+      // empty
+    }
+  }
+
+  /**
+   * Open a direct stream to a provider peer and request the blob for
+   * a given content hash. Returns null on any error or empty response.
+   * Caller MUST verify the returned hash matches before trusting the data.
+   */
+  async fetchFromPeer(peerId: unknown, contentHash: string): Promise<MeshItem | null> {
+    if (!this.node) return null
+    try {
+      const stream = await (this.node as unknown as {
+        dialProtocol: (peer: unknown, protocols: string | string[]) => Promise<LibStream>
+      }).dialProtocol(peerId, FETCH_PROTOCOL)
+
+      const req = new TextEncoder().encode(contentHash)
+      await stream.sink((async function* () { yield req })())
+
+      const data = await readStreamCapped(stream, MAX_FETCH_BYTES)
+      await stream.close?.()?.catch(() => undefined)
+      if (!data || data.length === 0) return null
+      return this.decodeMeshItem(data)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Internal: handle an inbound fetch stream — read contentHash, look it up
+   * in the local store via fetchHandler, write the encoded MeshItem (or
+   * empty on miss) and close.
+   */
+  private async serveFetchStream(stream: LibStream): Promise<void> {
+    try {
+      const reqBytes = await readStreamCapped(stream, 256)
+      const contentHash = new TextDecoder().decode(reqBytes).trim()
+      // SHA-256 hex is exactly 64 chars — reject anything else
+      if (!/^[0-9a-f]{64}$/i.test(contentHash)) {
+        await stream.sink((async function* () { yield new Uint8Array(0) })())
+        return
+      }
+      const item = this.fetchHandler ? this.fetchHandler(contentHash) : null
+      const payload = item ? this.encodeMeshItem(item) : new Uint8Array(0)
+      await stream.sink((async function* () { yield payload })())
+    } catch {
+      // ignore
+    } finally {
+      await stream.close?.()?.catch(() => undefined)
+    }
+  }
+
+  private contentHashToCid(contentHash: string): CID {
+    const bytes = new Uint8Array(contentHash.length / 2)
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Number.parseInt(contentHash.slice(i * 2, i * 2 + 2), 16)
+    }
+    const mh = Digest.create(SHA256_CODE, bytes)
+    return CID.create(1, raw.code, mh)
+  }
+
+  private encodeMeshItem(item: MeshItem): Uint8Array {
+    const json = JSON.stringify(item, (_k, v) => {
+      if (v instanceof Uint8Array) return { __uint8array: true, data: Array.from(v) }
+      return v
+    })
+    return new TextEncoder().encode(json)
+  }
+
+  private decodeMeshItem(data: Uint8Array): MeshItem | null {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(data), (_k, v) => {
+        if (v && typeof v === 'object' && (v as { __uint8array?: boolean }).__uint8array) {
+          return new Uint8Array((v as { data: number[] }).data)
+        }
+        return v
+      }) as { metadata: MeshItemMetadata; blob: Uint8Array }
+      if (!parsed || !parsed.metadata || !(parsed.blob instanceof Uint8Array)) return null
+      return parsed
+    } catch {
+      return null
+    }
   }
 
   /**
