@@ -1,0 +1,36 @@
+/**
+ * @attestto/mesh
+ *
+ * Distributed application data mesh over libp2p.
+ * Encrypted P2P storage for sovereign identity state.
+ *
+ * @license Apache-2.0
+ */
+
+// Types
+export type {
+  MeshItemMetadata,
+  SolanaAnchor,
+  MeshItem,
+  MeshKey,
+  MeshNodeConfig,
+  MeshNodeStatus,
+  StorageMetrics,
+  NodeLevel,
+  MeshEvent,
+  GossipMessage,
+  GossipPutMessage,
+  GossipTombstoneMessage,
+  ConflictCandidate,
+} from './types.js'
+
+export { meshKeyToString, stringToMeshKey, DEFAULT_CONFIG } from './types.js'
+
+// Core modules
+export { MeshNode } from './node.js'
+export { MeshStore } from './store.js'
+export { MeshProtocol } from './protocol.js'
+export { resolveConflict } from './conflict.js'
+export { MeshGC } from './gc.js'
+export { anchorToSolana } from './anchor.js'
+export { hashBlob, verifySignature } from './crypto.js'

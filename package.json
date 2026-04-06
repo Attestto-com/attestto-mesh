@@ -1,0 +1,71 @@
+{
+  "name": "@attestto/mesh",
+  "version": "0.1.0",
+  "description": "Distributed application data mesh over libp2p — encrypted P2P storage for sovereign identity state",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-gossipsub": "^14.1.2",
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/bootstrap": "^12.0.15",
+    "@libp2p/identify": "^4.0.14",
+    "@libp2p/kad-dht": "^16.1.7",
+    "@libp2p/tcp": "^11.0.14",
+    "better-sqlite3": "^11.8.1",
+    "libp2p": "^3.1.7",
+    "multiformats": "^13.3.3",
+    "uint8arrays": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.0",
+    "typescript": "~5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Attestto-com/attestto-mesh.git"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "keywords": [
+    "libp2p",
+    "mesh",
+    "distributed",
+    "identity",
+    "did",
+    "sovereign",
+    "p2p"
+  ]
+}

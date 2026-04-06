@@ -1,0 +1,196 @@
+/**
+ * @attestto/mesh — Core Types
+ *
+ * Distributed application data mesh for sovereign identity state.
+ * "Redis descentralizado" — not a file system.
+ */
+
+// ---------------------------------------------------------------------------
+// Mesh Item — the fundamental unit stored in the mesh
+// ---------------------------------------------------------------------------
+
+export interface MeshItemMetadata {
+  /** SHA-256 hash of the encrypted blob (content-addressed key) */
+  contentHash: string
+
+  /** DID of the data owner (e.g. did:sns:maria.sol) */
+  didOwner: string
+
+  /** Logical path within the owner's namespace (e.g. /credentials/cosevi-exam-2026) */
+  path: string
+
+  /** Monotonically increasing version number */
+  version: number
+
+  /** Time-to-live in seconds. 0 = permanent (requires Solana anchor) */
+  ttlSeconds: number
+
+  /** Unix timestamp (ms) when item was first stored locally */
+  createdAt: number
+
+  /** Unix timestamp (ms) of last local access (for LRU eviction) */
+  lastAccessedAt: number
+
+  /** Size of the encrypted blob in bytes */
+  sizeBytes: number
+
+  /** Ed25519 signature of the content by the DID owner */
+  signature: string
+
+  /** Solana anchor, if any */
+  solanaAnchor: SolanaAnchor | null
+}
+
+export interface SolanaAnchor {
+  /** Solana transaction hash */
+  txHash: string
+  /** Solana slot number */
+  slot: number
+  /** Unix timestamp (ms) of the anchor */
+  timestamp: number
+}
+
+export interface MeshItem {
+  metadata: MeshItemMetadata
+  /** Encrypted blob — the node cannot read this (Cartero Ciego) */
+  blob: Uint8Array
+}
+
+// ---------------------------------------------------------------------------
+// Mesh Key — how items are addressed in the DHT
+// ---------------------------------------------------------------------------
+
+/** DHT key = did:sns:owner/path → contentHash */
+export interface MeshKey {
+  didOwner: string
+  path: string
+}
+
+export function meshKeyToString(key: MeshKey): string {
+  return `${key.didOwner}/${key.path}`
+}
+
+export function stringToMeshKey(str: string): MeshKey {
+  const firstSlash = str.indexOf('/')
+  if (firstSlash === -1) throw new Error(`Invalid mesh key: ${str}`)
+  return {
+    didOwner: str.slice(0, firstSlash),
+    path: str.slice(firstSlash + 1),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Node Configuration
+// ---------------------------------------------------------------------------
+
+export interface MeshNodeConfig {
+  /** Directory for mesh data (index.db + store/) */
+  dataDir: string
+
+  /** Maximum storage in bytes (default: 250 MB) */
+  maxStorageBytes: number
+
+  /** Bootstrap peer multiaddrs */
+  bootstrapPeers: string[]
+
+  /** TCP listen port (0 = random) */
+  listenPort: number
+
+  /** GC interval in ms (default: 6 hours) */
+  gcIntervalMs: number
+
+  /** Minimum holders before LRU can evict (safety rail) */
+  minHoldersForEviction: number
+
+  /** Maximum item size in bytes (default: 10 KB) */
+  maxItemSizeBytes: number
+}
+
+export const DEFAULT_CONFIG: MeshNodeConfig = {
+  dataDir: '',
+  maxStorageBytes: 250 * 1024 * 1024, // 250 MB
+  bootstrapPeers: [],
+  listenPort: 0,
+  gcIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
+  minHoldersForEviction: 6,
+  maxItemSizeBytes: 10 * 1024, // 10 KB
+}
+
+// ---------------------------------------------------------------------------
+// Node Status
+// ---------------------------------------------------------------------------
+
+export type NodeLevel = 'anchor' | 'pro' | 'standard' | 'light'
+
+export interface MeshNodeStatus {
+  /** libp2p peer ID */
+  peerId: string
+  /** Number of connected peers */
+  peerCount: number
+  /** Whether DHT is ready */
+  dhtReady: boolean
+  /** Uptime in milliseconds */
+  uptimeMs: number
+  /** Storage usage */
+  storage: StorageMetrics
+  /** Node tier level */
+  level: NodeLevel
+}
+
+export interface StorageMetrics {
+  /** Bytes used */
+  usedBytes: number
+  /** Bytes limit */
+  limitBytes: number
+  /** Number of items stored */
+  itemCount: number
+  /** Usage percentage (0-100) */
+  percentage: number
+}
+
+// ---------------------------------------------------------------------------
+// Events emitted by the mesh node
+// ---------------------------------------------------------------------------
+
+export type MeshEvent =
+  | { type: 'peer:connected'; peerId: string }
+  | { type: 'peer:disconnected'; peerId: string }
+  | { type: 'item:received'; contentHash: string; didOwner: string; path: string }
+  | { type: 'item:stored'; contentHash: string }
+  | { type: 'item:evicted'; contentHash: string; reason: 'ttl' | 'version' | 'lru' | 'tombstone' }
+  | { type: 'storage:pressure'; percentage: number }
+  | { type: 'gc:completed'; itemsPruned: number; bytesFreed: number }
+  | { type: 'conflict:resolved'; key: string; winnerVersion: number; reason: 'anchor' | 'timestamp' | 'hash' }
+
+// ---------------------------------------------------------------------------
+// Gossip message types propagated via GossipSub
+// ---------------------------------------------------------------------------
+
+export type GossipMessage =
+  | GossipPutMessage
+  | GossipTombstoneMessage
+
+export interface GossipPutMessage {
+  type: 'put'
+  metadata: MeshItemMetadata
+  blob: Uint8Array
+}
+
+export interface GossipTombstoneMessage {
+  type: 'tombstone'
+  didOwner: string
+  /** Signature proving the DID owner authorized revocation */
+  signature: string
+  /** Tombstone TTL — 30 days for full propagation */
+  ttlSeconds: number
+  timestamp: number
+}
+
+// ---------------------------------------------------------------------------
+// Conflict resolution
+// ---------------------------------------------------------------------------
+
+export interface ConflictCandidate {
+  metadata: MeshItemMetadata
+  blob: Uint8Array
+}
