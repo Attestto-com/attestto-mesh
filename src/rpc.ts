@@ -109,6 +109,7 @@ export class MeshRpcServer {
       this.send(res, 200, {
         status: this.node.getStatus(),
         gossip: this.node.getGossipDiagnostic(),
+        connections: this.node.getConnectionDiagnostic(),
         multiaddrs: this.node.getMultiaddrs(),
       })
       return

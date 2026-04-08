@@ -486,6 +486,22 @@ export class MeshNode extends EventEmitter {
    * Diagnostic — returns gossipsub mesh state for the current topic.
    * Used by RPC /diag to debug message propagation issues on small benches.
    */
+  /** Diagnostic — list libp2p connections + protocols negotiated per peer. */
+  getConnectionDiagnostic(): Array<{ peerId: string; protocols: string[]; streams: number }> {
+    if (!this.node) return []
+    const connections = (this.node as unknown as {
+      getConnections: () => Array<{
+        remotePeer: { toString: () => string }
+        streams: Array<{ protocol?: string }>
+      }>
+    }).getConnections()
+    return connections.map((c) => ({
+      peerId: c.remotePeer.toString(),
+      protocols: Array.from(new Set(c.streams.map((s) => s.protocol ?? '?'))),
+      streams: c.streams.length,
+    }))
+  }
+
   getGossipDiagnostic(): { topic: string; subscribers: string[]; meshPeers: string[] } {
     const pubsub = this.getPubsub() as unknown as {
       getSubscribers?: (topic: string) => Array<{ toString: () => string }>
