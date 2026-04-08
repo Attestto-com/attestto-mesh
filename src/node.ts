@@ -549,19 +549,31 @@ export class MeshNode extends EventEmitter {
     return out
   }
 
-  getGossipDiagnostic(): { topic: string; subscribers: string[]; meshPeers: string[] } {
+  getGossipDiagnostic(): {
+    topic: string
+    selfTopics: string[]
+    subscribers: string[]
+    meshPeers: string[]
+    allPubsubPeers: string[]
+  } {
     const pubsub = this.getPubsub() as unknown as {
+      getTopics?: () => string[]
       getSubscribers?: (topic: string) => Array<{ toString: () => string }>
       getMeshPeers?: (topic: string) => string[]
+      getPeers?: () => Array<{ toString: () => string }>
     } | null
-    if (!pubsub) return { topic: this.topic, subscribers: [], meshPeers: [] }
+    if (!pubsub) return { topic: this.topic, selfTopics: [], subscribers: [], meshPeers: [], allPubsubPeers: [] }
+    const selfTopics = typeof pubsub.getTopics === 'function' ? pubsub.getTopics() : []
     const subscribers = typeof pubsub.getSubscribers === 'function'
       ? pubsub.getSubscribers(this.topic).map((p) => p.toString())
       : []
     const meshPeers = typeof pubsub.getMeshPeers === 'function'
       ? pubsub.getMeshPeers(this.topic).map((p) => p.toString())
       : []
-    return { topic: this.topic, subscribers, meshPeers }
+    const allPubsubPeers = typeof pubsub.getPeers === 'function'
+      ? pubsub.getPeers().map((p) => p.toString())
+      : []
+    return { topic: this.topic, selfTopics, subscribers, meshPeers, allPubsubPeers }
   }
 
   /**
