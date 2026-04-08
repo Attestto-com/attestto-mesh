@@ -20,6 +20,7 @@ import { bootstrap } from '@libp2p/bootstrap'
 import { identify } from '@libp2p/identify'
 import { ping } from '@libp2p/ping'
 import { circuitRelayTransport, circuitRelayServer } from '@libp2p/circuit-relay-v2'
+import type { PrivateKey } from '@libp2p/interface'
 import { EventEmitter } from 'node:events'
 import { CID } from 'multiformats/cid'
 import * as Digest from 'multiformats/hashes/digest'
@@ -95,10 +96,13 @@ export class MeshNode extends EventEmitter {
   }
   private peerRates = new Map<string, PeerRateState>()
   private fetchHandler: ((contentHash: string) => MeshItem | null) | null = null
+  private privateKey: PrivateKey | undefined
 
-  constructor(config: Partial<MeshNodeConfig> & { dataDir: string }) {
+  constructor(config: Partial<MeshNodeConfig> & { dataDir: string; privateKey?: PrivateKey }) {
     super()
-    this.config = { ...DEFAULT_CONFIG, ...config }
+    const { privateKey, ...rest } = config
+    this.privateKey = privateKey
+    this.config = { ...DEFAULT_CONFIG, ...rest }
     this.topic = gossipTopic(this.config.meshId)
   }
 
@@ -139,6 +143,7 @@ export class MeshNode extends EventEmitter {
     }
 
     this.node = await createLibp2p({
+      ...(this.privateKey ? { privateKey: this.privateKey } : {}),
       addresses: {
         listen: [`/ip4/${this.config.listenAddress}/tcp/${this.config.listenPort}`],
       },

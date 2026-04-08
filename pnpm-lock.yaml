@@ -23,9 +23,15 @@ importers:
       '@libp2p/circuit-relay-v2':
         specifier: ^4.1.7
         version: 4.1.7
+      '@libp2p/crypto':
+        specifier: ^5.1.14
+        version: 5.1.14
       '@libp2p/identify':
         specifier: ^4.0.14
         version: 4.0.14
+      '@libp2p/interface':
+        specifier: ^3.1.1
+        version: 3.1.1
       '@libp2p/kad-dht':
         specifier: ^16.1.7
         version: 16.1.7

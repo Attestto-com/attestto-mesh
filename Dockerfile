@@ -23,6 +23,7 @@ ENV MESH_DATA_DIR=/data/mesh
 # Default port
 EXPOSE 4001
 
-# Default: run the local demo (both nodes in one process)
-# Override with: docker run attestto-mesh --role alpha --port 4001
-ENTRYPOINT ["pnpm", "exec", "tsx", "demo/proof-of-logic.ts"]
+# Default: run the persistent node daemon (env-driven, persists PeerID).
+# To run the proof-of-logic demo instead:
+#   docker run --entrypoint pnpm attestto-mesh exec tsx demo/proof-of-logic.ts
+ENTRYPOINT ["pnpm", "exec", "tsx", "src/daemon.ts"]
