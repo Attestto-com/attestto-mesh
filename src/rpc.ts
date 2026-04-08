@@ -110,6 +110,7 @@ export class MeshRpcServer {
         status: this.node.getStatus(),
         gossip: this.node.getGossipDiagnostic(),
         connections: this.node.getConnectionDiagnostic(),
+        selfProtocols: this.node.getSelfProtocols(),
         multiaddrs: this.node.getMultiaddrs(),
       })
       return
