@@ -222,10 +222,19 @@ export class MeshNode extends EventEmitter {
       provide?: (cid: CID) => AsyncIterable<unknown>
     } | null
     if (!dht || typeof dht.provide !== 'function') return
+    const TIMEOUT_MS = 3000
     try {
       const cid = this.contentHashToCid(contentHash)
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _evt of dht.provide(cid)) { /* drain provide events */ }
+      const drain = (async () => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _evt of dht.provide!(cid)) { /* drain */ }
+      })()
+      await Promise.race([
+        drain,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('provide timeout')), TIMEOUT_MS)
+        ),
+      ])
     } catch {
       // best-effort
     }
@@ -367,12 +376,29 @@ export class MeshNode extends EventEmitter {
   }
 
   /**
-   * Put a value into the DHT.
+   * Put a value into the DHT — best-effort with a timeout.
+   *
+   * On a small mesh (< K=20 peers), Kademlia's put waits for replication to
+   * K closest peers and effectively never completes. We don't want PUT to
+   * block on that: gossip carries the full message to currently-connected
+   * peers, and the DHT entry is only needed for peers that join LATER and
+   * have to look up the (didOwner, path) → contentHash mapping. Treat the
+   * DHT write as opportunistic — log timeouts and move on.
    */
   async dhtPut(key: Uint8Array, value: Uint8Array): Promise<void> {
     const dht = this.getDHT()
     if (!dht) throw new Error('Node not started')
-    await dht.put(key, value)
+    const TIMEOUT_MS = 3000
+    try {
+      await Promise.race([
+        dht.put(key, value),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('dhtPut timeout')), TIMEOUT_MS)
+        ),
+      ])
+    } catch {
+      // best-effort — gossip is the primary delivery channel
+    }
   }
 
   /**
@@ -381,16 +407,21 @@ export class MeshNode extends EventEmitter {
   async dhtGet(key: Uint8Array): Promise<Uint8Array | null> {
     const dht = this.getDHT()
     if (!dht) throw new Error('Node not started')
+    const TIMEOUT_MS = 3000
     try {
-      for await (const event of dht.get(key)) {
-        if (event.name === 'VALUE' && event.value) {
-          return event.value
+      const find = (async (): Promise<Uint8Array | null> => {
+        for await (const event of dht.get(key)) {
+          if (event.name === 'VALUE' && event.value) return event.value
         }
-      }
+        return null
+      })()
+      return await Promise.race([
+        find,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), TIMEOUT_MS)),
+      ])
     } catch {
       return null
     }
-    return null
   }
 
   /**
