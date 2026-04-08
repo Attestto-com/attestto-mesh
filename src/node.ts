@@ -166,10 +166,11 @@ export class MeshNode extends EventEmitter {
       this.emitMeshEvent({ type: 'peer:disconnected', peerId })
     })
 
-    // Subscribe to mesh gossip topic
+    // Wire up gossipsub message listener (subscribe is deferred until AFTER
+    // node.start() — subscribing on a not-yet-started node leaves the
+    // subscription in a pre-start state that never propagates to peers).
     const pubsub = this.getPubsub()
     if (pubsub) {
-      pubsub.subscribe(this.topic)
       pubsub.addEventListener('message', (evt: unknown) => {
         const e = evt as { detail: { topic: string; data: Uint8Array; from?: { toString(): string } } }
         if (e.detail.topic !== this.topic) return
@@ -203,6 +204,13 @@ export class MeshNode extends EventEmitter {
 
     await this.node.start()
     this.startedAt = Date.now()
+
+    // Subscribe AFTER start so the subscription announcement actually fires
+    // to (current and future) connected peers via gossipsub.
+    const pubsubStarted = this.getPubsub()
+    if (pubsubStarted) {
+      pubsubStarted.subscribe(this.topic)
+    }
   }
 
   /**
