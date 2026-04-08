@@ -18,6 +18,8 @@ services:
     restart: unless-stopped
     ports:
       - "${MESH_LISTEN_PORT:-4001}:${MESH_LISTEN_PORT:-4001}"
+      # RPC published only to host loopback — daemon binds 0.0.0.0 inside the container.
+      - "127.0.0.1:${MESH_RPC_PORT:-4101}:${MESH_RPC_PORT:-4101}"
     environment:
       MESH_DATA_DIR: /data/mesh
       MESH_LISTEN_PORT: ${MESH_LISTEN_PORT:-4001}
@@ -27,6 +29,9 @@ services:
       MESH_MAX_STORAGE_MB: ${MESH_MAX_STORAGE_MB:-250}
       MESH_RELAY_SERVER: ${MESH_RELAY_SERVER:-0}
       MESH_STATUS_INTERVAL: ${MESH_STATUS_INTERVAL:-30000}
+      MESH_RPC_PORT: ${MESH_RPC_PORT:-4101}
+      MESH_RPC_BIND: 0.0.0.0
+      MESH_RPC_TOKEN: ${MESH_RPC_TOKEN:-}
     volumes:
       - mesh-data:/data/mesh
 
