@@ -498,19 +498,45 @@ export class MeshNode extends EventEmitter {
   }
 
   /** Diagnostic — list libp2p connections + protocols negotiated per peer. */
-  getConnectionDiagnostic(): Array<{ peerId: string; protocols: string[]; streams: number }> {
+  async getConnectionDiagnostic(): Promise<Array<{
+    peerId: string
+    activeStreams: string[]
+    streamCount: number
+    remoteProtocols: string[]
+  }>> {
     if (!this.node) return []
-    const connections = (this.node as unknown as {
+    const node = this.node as unknown as {
       getConnections: () => Array<{
         remotePeer: { toString: () => string }
         streams: Array<{ protocol?: string }>
       }>
-    }).getConnections()
-    return connections.map((c) => ({
-      peerId: c.remotePeer.toString(),
-      protocols: Array.from(new Set(c.streams.map((s) => s.protocol ?? '?'))),
-      streams: c.streams.length,
-    }))
+      peerStore: {
+        get: (peerId: unknown) => Promise<{ protocols?: string[] } | undefined>
+      }
+    }
+    const connections = node.getConnections()
+    const out: Array<{
+      peerId: string
+      activeStreams: string[]
+      streamCount: number
+      remoteProtocols: string[]
+    }> = []
+    for (const c of connections) {
+      let remoteProtocols: string[] = []
+      try {
+        const peer = await node.peerStore.get(c.remotePeer as unknown as object)
+        remoteProtocols = peer?.protocols ?? []
+      } catch {
+        remoteProtocols = []
+      }
+      out.push({
+        peerId: c.remotePeer.toString(),
+        activeStreams: c.streams.map((s) => s.protocol ?? '?'),
+        streamCount: c.streams.length,
+        remoteProtocols,
+      })
+    }
+    return out
   }
 
   getGossipDiagnostic(): { topic: string; subscribers: string[]; meshPeers: string[] } {
