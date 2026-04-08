@@ -24,6 +24,7 @@ ENV MESH_DATA_DIR=/data/mesh
 EXPOSE 4001
 
 # Default: run the persistent node daemon (env-driven, persists PeerID).
-# To run the proof-of-logic demo instead:
-#   docker run --entrypoint pnpm attestto-mesh exec tsx demo/proof-of-logic.ts
-ENTRYPOINT ["pnpm", "exec", "tsx", "src/daemon.ts"]
+# Use node directly (not `pnpm exec`) — pnpm's wrapper duplicates child
+# process output through Docker's log driver, causing every line to appear
+# twice in `docker logs`.
+ENTRYPOINT ["node", "--import", "tsx", "src/daemon.ts"]

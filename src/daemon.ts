@@ -116,7 +116,7 @@ async function main(): Promise<void> {
 
   let rpc: MeshRpcServer | null = null
   if (RPC_PORT > 0) {
-    rpc = new MeshRpcServer(node, protocol, { port: RPC_PORT, bind: RPC_BIND, token: RPC_TOKEN })
+    rpc = new MeshRpcServer(node, protocol, store, { port: RPC_PORT, bind: RPC_BIND, token: RPC_TOKEN })
     await rpc.start()
     log(`RPC listening on http://${RPC_BIND}:${RPC_PORT}`)
   }

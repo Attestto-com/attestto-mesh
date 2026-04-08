@@ -20,6 +20,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import type { MeshNode } from './node.js'
 import type { MeshProtocol } from './protocol.js'
+import type { MeshStore } from './store.js'
 
 interface RpcOptions {
   port: number
@@ -30,12 +31,14 @@ interface RpcOptions {
 export class MeshRpcServer {
   private node: MeshNode
   private protocol: MeshProtocol
+  private store: MeshStore
   private opts: RpcOptions
   private server: Server | null = null
 
-  constructor(node: MeshNode, protocol: MeshProtocol, opts: RpcOptions) {
+  constructor(node: MeshNode, protocol: MeshProtocol, store: MeshStore, opts: RpcOptions) {
     this.node = node
     this.protocol = protocol
+    this.store = store
     this.opts = opts
   }
 
@@ -112,6 +115,21 @@ export class MeshRpcServer {
         connections: await this.node.getConnectionDiagnostic(),
         selfProtocols: this.node.getSelfProtocols(),
         multiaddrs: this.node.getMultiaddrs(),
+      })
+      return
+    }
+
+    if (method === 'GET' && url.pathname === '/list') {
+      const items = this.store.list()
+      this.send(res, 200, {
+        count: items.length,
+        items: items.map((m) => ({
+          contentHash: m.contentHash,
+          didOwner: m.didOwner,
+          path: m.path,
+          version: m.version,
+          sizeBytes: m.sizeBytes,
+        })),
       })
       return
     }
