@@ -24,7 +24,7 @@ export type {
   ConflictCandidate,
 } from './types.js'
 
-export { meshKeyToString, stringToMeshKey, DEFAULT_CONFIG } from './types.js'
+export { meshKeyToString, stringToMeshKey, DEFAULT_CONFIG, PUBLIC_BOOTSTRAP_PEERS } from './types.js'
 
 // Core modules
 export { MeshNode } from './node.js'

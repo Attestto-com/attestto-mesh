@@ -123,11 +123,28 @@ export interface MeshNodeConfig {
   enableRelayClient: boolean
 }
 
+/**
+ * Public Attestto-operated mesh anchor nodes. Baked into DEFAULT_CONFIG so any
+ * consumer of @attestto/mesh joins the public mesh out of the box. Override by
+ * passing a custom `bootstrapPeers` to MeshNode (e.g. empty array for tests,
+ * or a private list for isolated deployments).
+ *
+ * Each anchor runs `src/daemon.ts` with MESH_RELAY_SERVER=1 and persistent
+ * peer keys on stable storage. Hostnames are owned by Attestto so the IP can
+ * change without breaking deployed clients.
+ */
+export const PUBLIC_BOOTSTRAP_PEERS: readonly string[] = [
+  // attestto-anchor-cr — Fly.io dfw (Dallas), via Cloudflare DNS-only CNAME.
+  '/dns4/anchor.attestto.org/tcp/4001/p2p/12D3KooWCrRxaNTcvbK8HatLgyq3NsuqBRqY32PaUH9wgpHmLtCw',
+]
+
 export const DEFAULT_CONFIG: MeshNodeConfig = {
   dataDir: '',
   maxStorageBytes: 250 * 1024 * 1024, // 250 MB
-  bootstrapPeers: [],
+  bootstrapPeers: [...PUBLIC_BOOTSTRAP_PEERS],
   listenPort: 0,
+  // Defaults to loopback for safety — anchor nodes (daemon.ts) and the
+  // desktop explicitly opt into 0.0.0.0. Tests assert this default.
   listenAddress: '127.0.0.1',
   gcIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
   minHoldersForEviction: 6,
