@@ -78,16 +78,6 @@ export class MeshProtocol {
     // peers use findProviders(contentHash) to discover us via fetchFromPeer).
     await this.node.provideContent(contentHash).catch(() => { /* best-effort */ })
 
-    // Gossip the full item to peers (best-effort; gossipsub mesh formation
-    // is unreliable on small benches and we use direct push as the primary
-    // propagation channel below).
-    const gossipMsg: GossipPutMessage = {
-      type: 'put',
-      metadata: fullMetadata,
-      blob,
-    }
-    await this.node.publish(gossipMsg).catch(() => { /* best-effort */ })
-
     // Direct push to all currently connected peers — primary propagation
     // channel. Bypasses gossipsub entirely; uses libp2p streams.
     if (typeof this.node.pushToAll === 'function') {

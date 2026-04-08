@@ -273,7 +273,7 @@ export class MeshNode extends EventEmitter {
         try {
           const stream = await node.dialProtocol(c.remotePeer as unknown as object, PUSH_PROTOCOL)
           await stream.sink((async function* () { yield payload })())
-          await stream.close?.()?.catch(() => undefined)
+          try { await stream?.close?.() } catch { /* ignore */ }
           delivered++
         } catch {
           // peer-level failure — skip
@@ -294,7 +294,7 @@ export class MeshNode extends EventEmitter {
     } catch {
       // ignore
     } finally {
-      await stream.close?.()?.catch(() => undefined)
+      try { await stream?.close?.() } catch { /* ignore */ }
     }
   }
 
@@ -372,7 +372,7 @@ export class MeshNode extends EventEmitter {
       await stream.sink((async function* () { yield req })())
 
       const data = await readStreamCapped(stream, MAX_FETCH_BYTES)
-      await stream.close?.()?.catch(() => undefined)
+      try { await stream?.close?.() } catch { /* ignore */ }
       if (!data || data.length === 0) return null
       return this.decodeMeshItem(data)
     } catch {
@@ -400,7 +400,7 @@ export class MeshNode extends EventEmitter {
     } catch {
       // ignore
     } finally {
-      await stream.close?.()?.catch(() => undefined)
+      try { await stream?.close?.() } catch { /* ignore */ }
     }
   }
 
