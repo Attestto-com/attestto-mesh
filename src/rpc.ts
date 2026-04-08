@@ -105,6 +105,15 @@ export class MeshRpcServer {
       return
     }
 
+    if (method === 'GET' && url.pathname === '/diag') {
+      this.send(res, 200, {
+        status: this.node.getStatus(),
+        gossip: this.node.getGossipDiagnostic(),
+        multiaddrs: this.node.getMultiaddrs(),
+      })
+      return
+    }
+
     if (method === 'GET' && url.pathname === '/metrics') {
       const s = this.node.getStatus()
       const lines = [

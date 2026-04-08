@@ -475,6 +475,25 @@ export class MeshNode extends EventEmitter {
   }
 
   /**
+   * Diagnostic — returns gossipsub mesh state for the current topic.
+   * Used by RPC /diag to debug message propagation issues on small benches.
+   */
+  getGossipDiagnostic(): { topic: string; subscribers: string[]; meshPeers: string[] } {
+    const pubsub = this.getPubsub() as unknown as {
+      getSubscribers?: (topic: string) => Array<{ toString: () => string }>
+      getMeshPeers?: (topic: string) => string[]
+    } | null
+    if (!pubsub) return { topic: this.topic, subscribers: [], meshPeers: [] }
+    const subscribers = typeof pubsub.getSubscribers === 'function'
+      ? pubsub.getSubscribers(this.topic).map((p) => p.toString())
+      : []
+    const meshPeers = typeof pubsub.getMeshPeers === 'function'
+      ? pubsub.getMeshPeers(this.topic).map((p) => p.toString())
+      : []
+    return { topic: this.topic, subscribers, meshPeers }
+  }
+
+  /**
    * Get multiaddrs this node is listening on.
    */
   getMultiaddrs(): string[] {
