@@ -121,6 +121,16 @@ export class MeshNode extends EventEmitter {
       pubsub: gossipsub({
         emitSelf: false,
         allowPublishToZeroTopicPeers: true,
+        // floodPublish: send to ALL peers known to support the protocol, not
+        // just the topic-mesh subset. Critical for tiny benches (< D=6 peers)
+        // where mesh formation is unreliable. Slight overhead at scale, but
+        // we never have huge fanout in our model anyway.
+        floodPublish: true,
+        // Allow the mesh to form with just 1 peer. Defaults are D=6/Dlo=4/Dhi=12
+        // which strand small networks.
+        D: 4,
+        Dlo: 1,
+        Dhi: 8,
       }),
     }
 
