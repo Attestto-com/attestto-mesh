@@ -41,6 +41,12 @@ import { DEFAULT_CONFIG } from './types.js'
 /** libp2p protocol id for direct blob fetch by content hash */
 const FETCH_PROTOCOL = '/attestto/mesh/fetch/1.0.0'
 
+/** libp2p protocol id for direct PUT propagation to all known peers */
+const PUSH_PROTOCOL = '/attestto/mesh/push/1.0.0'
+
+/** Max push payload — must fit a MeshItem envelope */
+const MAX_PUSH_BYTES = 64 * 1024
+
 /** SHA-256 multihash code */
 const SHA256_CODE = 0x12
 
@@ -96,6 +102,7 @@ export class MeshNode extends EventEmitter {
   }
   private peerRates = new Map<string, PeerRateState>()
   private fetchHandler: ((contentHash: string) => MeshItem | null) | null = null
+  private pushHandler: ((item: MeshItem) => void) | null = null
   private privateKey: PrivateKey | undefined
 
   constructor(config: Partial<MeshNodeConfig> & { dataDir: string; privateKey?: PrivateKey }) {
@@ -203,13 +210,20 @@ export class MeshNode extends EventEmitter {
 
     // Register direct blob fetch protocol — peers ask us for a contentHash,
     // we serve from local store (only items we already hold).
-    await (this.node as unknown as {
+    const handleProto = (this.node as unknown as {
       handle: (
         protocol: string,
         handler: (info: { stream: LibStream }) => void | Promise<void>
       ) => Promise<void>
-    }).handle(FETCH_PROTOCOL, ({ stream }) => {
+    }).handle.bind(this.node)
+    await handleProto(FETCH_PROTOCOL, ({ stream }) => {
       void this.serveFetchStream(stream)
+    })
+
+    // Register direct PUT push protocol — peers stream a MeshItem envelope
+    // and we hand it to the protocol layer for verification + local store.
+    await handleProto(PUSH_PROTOCOL, ({ stream }) => {
+      void this.servePushStream(stream)
     })
 
     await this.node.start()
@@ -229,6 +243,59 @@ export class MeshNode extends EventEmitter {
    */
   setFetchHandler(fn: (contentHash: string) => MeshItem | null): void {
     this.fetchHandler = fn
+  }
+
+  /**
+   * Register a handler for inbound pushed items. Called by MeshProtocol to
+   * receive PUT broadcasts via the direct push protocol (replaces gossipsub
+   * for cross-peer propagation, which has been unreliable on small benches).
+   */
+  setPushHandler(fn: (item: MeshItem) => void): void {
+    this.pushHandler = fn
+  }
+
+  /**
+   * Push a MeshItem envelope to every currently connected peer via direct
+   * libp2p streams. Returns the number of peers we successfully delivered to.
+   * Best-effort: peer-level failures don't abort the rest.
+   */
+  async pushToAll(item: MeshItem): Promise<number> {
+    if (!this.node) return 0
+    const node = this.node as unknown as {
+      getConnections: () => Array<{ remotePeer: { toString: () => string } }>
+      dialProtocol: (peer: unknown, protocols: string | string[]) => Promise<LibStream>
+    }
+    const connections = node.getConnections()
+    const payload = this.encodeMeshItem(item)
+    let delivered = 0
+    await Promise.all(
+      connections.map(async (c) => {
+        try {
+          const stream = await node.dialProtocol(c.remotePeer as unknown as object, PUSH_PROTOCOL)
+          await stream.sink((async function* () { yield payload })())
+          await stream.close?.()?.catch(() => undefined)
+          delivered++
+        } catch {
+          // peer-level failure — skip
+        }
+      })
+    )
+    return delivered
+  }
+
+  /** Internal: read a pushed MeshItem from a stream and dispatch to handler. */
+  private async servePushStream(stream: LibStream): Promise<void> {
+    try {
+      const data = await readStreamCapped(stream, MAX_PUSH_BYTES)
+      if (!data || data.length === 0) return
+      const item = this.decodeMeshItem(data)
+      if (!item) return
+      if (this.pushHandler) this.pushHandler(item)
+    } catch {
+      // ignore
+    } finally {
+      await stream.close?.()?.catch(() => undefined)
+    }
   }
 
   /**
