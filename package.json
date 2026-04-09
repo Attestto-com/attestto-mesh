@@ -43,7 +43,7 @@
     "@libp2p/ping": "^3.0.14",
     "@libp2p/tcp": "^11.0.14",
     "@libp2p/webrtc": "^6.0.15",
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^12.2.0",
     "libp2p": "^3.1.7",
     "multiformats": "^13.3.3",
     "uint8arrays": "^5.1.0"
