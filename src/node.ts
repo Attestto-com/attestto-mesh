@@ -20,6 +20,7 @@ import { bootstrap } from '@libp2p/bootstrap'
 import { identify } from '@libp2p/identify'
 import { ping } from '@libp2p/ping'
 import { circuitRelayTransport, circuitRelayServer } from '@libp2p/circuit-relay-v2'
+import type { PrivateKey } from '@libp2p/interface'
 import { EventEmitter } from 'node:events'
 import { CID } from 'multiformats/cid'
 import * as Digest from 'multiformats/hashes/digest'
@@ -39,6 +40,12 @@ import { DEFAULT_CONFIG } from './types.js'
 
 /** libp2p protocol id for direct blob fetch by content hash */
 const FETCH_PROTOCOL = '/attestto/mesh/fetch/1.0.0'
+
+/** libp2p protocol id for direct PUT propagation to all known peers */
+const PUSH_PROTOCOL = '/attestto/mesh/push/1.0.0'
+
+/** Max push payload — must fit a MeshItem envelope */
+const MAX_PUSH_BYTES = 64 * 1024
 
 /** SHA-256 multihash code */
 const SHA256_CODE = 0x12
@@ -95,10 +102,14 @@ export class MeshNode extends EventEmitter {
   }
   private peerRates = new Map<string, PeerRateState>()
   private fetchHandler: ((contentHash: string) => MeshItem | null) | null = null
+  private pushHandler: ((item: MeshItem) => void) | null = null
+  private privateKey: PrivateKey | undefined
 
-  constructor(config: Partial<MeshNodeConfig> & { dataDir: string }) {
+  constructor(config: Partial<MeshNodeConfig> & { dataDir: string; privateKey?: PrivateKey }) {
     super()
-    this.config = { ...DEFAULT_CONFIG, ...config }
+    const { privateKey, ...rest } = config
+    this.privateKey = privateKey
+    this.config = { ...DEFAULT_CONFIG, ...rest }
     this.topic = gossipTopic(this.config.meshId)
   }
 
@@ -117,6 +128,16 @@ export class MeshNode extends EventEmitter {
       pubsub: gossipsub({
         emitSelf: false,
         allowPublishToZeroTopicPeers: true,
+        // floodPublish: send to ALL peers known to support the protocol, not
+        // just the topic-mesh subset. Critical for tiny benches (< D=6 peers)
+        // where mesh formation is unreliable. Slight overhead at scale, but
+        // we never have huge fanout in our model anyway.
+        floodPublish: true,
+        // Allow the mesh to form with just 1 peer. Defaults are D=6/Dlo=4/Dhi=12
+        // which strand small networks.
+        D: 4,
+        Dlo: 1,
+        Dhi: 8,
       }),
     }
 
@@ -139,6 +160,7 @@ export class MeshNode extends EventEmitter {
     }
 
     this.node = await createLibp2p({
+      ...(this.privateKey ? { privateKey: this.privateKey } : {}),
       addresses: {
         listen: [`/ip4/${this.config.listenAddress}/tcp/${this.config.listenPort}`],
       },
@@ -161,10 +183,11 @@ export class MeshNode extends EventEmitter {
       this.emitMeshEvent({ type: 'peer:disconnected', peerId })
     })
 
-    // Subscribe to mesh gossip topic
+    // Wire up gossipsub message listener (subscribe is deferred until AFTER
+    // node.start() — subscribing on a not-yet-started node leaves the
+    // subscription in a pre-start state that never propagates to peers).
     const pubsub = this.getPubsub()
     if (pubsub) {
-      pubsub.subscribe(this.topic)
       pubsub.addEventListener('message', (evt: unknown) => {
         const e = evt as { detail: { topic: string; data: Uint8Array; from?: { toString(): string } } }
         if (e.detail.topic !== this.topic) return
@@ -187,17 +210,31 @@ export class MeshNode extends EventEmitter {
 
     // Register direct blob fetch protocol — peers ask us for a contentHash,
     // we serve from local store (only items we already hold).
-    await (this.node as unknown as {
+    const handleProto = (this.node as unknown as {
       handle: (
         protocol: string,
         handler: (info: { stream: LibStream }) => void | Promise<void>
       ) => Promise<void>
-    }).handle(FETCH_PROTOCOL, ({ stream }) => {
+    }).handle.bind(this.node)
+    await handleProto(FETCH_PROTOCOL, ({ stream }) => {
       void this.serveFetchStream(stream)
+    })
+
+    // Register direct PUT push protocol — peers stream a MeshItem envelope
+    // and we hand it to the protocol layer for verification + local store.
+    await handleProto(PUSH_PROTOCOL, ({ stream }) => {
+      void this.servePushStream(stream)
     })
 
     await this.node.start()
     this.startedAt = Date.now()
+
+    // Subscribe AFTER start so the subscription announcement actually fires
+    // to (current and future) connected peers via gossipsub.
+    const pubsubStarted = this.getPubsub()
+    if (pubsubStarted) {
+      pubsubStarted.subscribe(this.topic)
+    }
   }
 
   /**
@@ -209,6 +246,59 @@ export class MeshNode extends EventEmitter {
   }
 
   /**
+   * Register a handler for inbound pushed items. Called by MeshProtocol to
+   * receive PUT broadcasts via the direct push protocol (replaces gossipsub
+   * for cross-peer propagation, which has been unreliable on small benches).
+   */
+  setPushHandler(fn: (item: MeshItem) => void): void {
+    this.pushHandler = fn
+  }
+
+  /**
+   * Push a MeshItem envelope to every currently connected peer via direct
+   * libp2p streams. Returns the number of peers we successfully delivered to.
+   * Best-effort: peer-level failures don't abort the rest.
+   */
+  async pushToAll(item: MeshItem): Promise<number> {
+    if (!this.node) return 0
+    const node = this.node as unknown as {
+      getConnections: () => Array<{ remotePeer: { toString: () => string } }>
+      dialProtocol: (peer: unknown, protocols: string | string[]) => Promise<LibStream>
+    }
+    const connections = node.getConnections()
+    const payload = this.encodeMeshItem(item)
+    let delivered = 0
+    await Promise.all(
+      connections.map(async (c) => {
+        try {
+          const stream = await node.dialProtocol(c.remotePeer as unknown as object, PUSH_PROTOCOL)
+          await stream.sink((async function* () { yield payload })())
+          try { await stream?.close?.() } catch { /* ignore */ }
+          delivered++
+        } catch {
+          // peer-level failure — skip
+        }
+      })
+    )
+    return delivered
+  }
+
+  /** Internal: read a pushed MeshItem from a stream and dispatch to handler. */
+  private async servePushStream(stream: LibStream): Promise<void> {
+    try {
+      const data = await readStreamCapped(stream, MAX_PUSH_BYTES)
+      if (!data || data.length === 0) return
+      const item = this.decodeMeshItem(data)
+      if (!item) return
+      if (this.pushHandler) this.pushHandler(item)
+    } catch {
+      // ignore
+    } finally {
+      try { await stream?.close?.() } catch { /* ignore */ }
+    }
+  }
+
+  /**
    * Announce to the DHT that this node provides the given content hash.
    * Best-effort — silently ignores failures (no peers, DHT not ready, etc.).
    */
@@ -217,10 +307,19 @@ export class MeshNode extends EventEmitter {
       provide?: (cid: CID) => AsyncIterable<unknown>
     } | null
     if (!dht || typeof dht.provide !== 'function') return
+    const TIMEOUT_MS = 3000
     try {
       const cid = this.contentHashToCid(contentHash)
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _evt of dht.provide(cid)) { /* drain provide events */ }
+      const drain = (async () => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _evt of dht.provide!(cid)) { /* drain */ }
+      })()
+      await Promise.race([
+        drain,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('provide timeout')), TIMEOUT_MS)
+        ),
+      ])
     } catch {
       // best-effort
     }
@@ -273,7 +372,7 @@ export class MeshNode extends EventEmitter {
       await stream.sink((async function* () { yield req })())
 
       const data = await readStreamCapped(stream, MAX_FETCH_BYTES)
-      await stream.close?.()?.catch(() => undefined)
+      try { await stream?.close?.() } catch { /* ignore */ }
       if (!data || data.length === 0) return null
       return this.decodeMeshItem(data)
     } catch {
@@ -301,7 +400,7 @@ export class MeshNode extends EventEmitter {
     } catch {
       // ignore
     } finally {
-      await stream.close?.()?.catch(() => undefined)
+      try { await stream?.close?.() } catch { /* ignore */ }
     }
   }
 
@@ -362,12 +461,29 @@ export class MeshNode extends EventEmitter {
   }
 
   /**
-   * Put a value into the DHT.
+   * Put a value into the DHT — best-effort with a timeout.
+   *
+   * On a small mesh (< K=20 peers), Kademlia's put waits for replication to
+   * K closest peers and effectively never completes. We don't want PUT to
+   * block on that: gossip carries the full message to currently-connected
+   * peers, and the DHT entry is only needed for peers that join LATER and
+   * have to look up the (didOwner, path) → contentHash mapping. Treat the
+   * DHT write as opportunistic — log timeouts and move on.
    */
   async dhtPut(key: Uint8Array, value: Uint8Array): Promise<void> {
     const dht = this.getDHT()
     if (!dht) throw new Error('Node not started')
-    await dht.put(key, value)
+    const TIMEOUT_MS = 3000
+    try {
+      await Promise.race([
+        dht.put(key, value),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('dhtPut timeout')), TIMEOUT_MS)
+        ),
+      ])
+    } catch {
+      // best-effort — gossip is the primary delivery channel
+    }
   }
 
   /**
@@ -376,16 +492,21 @@ export class MeshNode extends EventEmitter {
   async dhtGet(key: Uint8Array): Promise<Uint8Array | null> {
     const dht = this.getDHT()
     if (!dht) throw new Error('Node not started')
+    const TIMEOUT_MS = 3000
     try {
-      for await (const event of dht.get(key)) {
-        if (event.name === 'VALUE' && event.value) {
-          return event.value
+      const find = (async (): Promise<Uint8Array | null> => {
+        for await (const event of dht.get(key)) {
+          if (event.name === 'VALUE' && event.value) return event.value
         }
-      }
+        return null
+      })()
+      return await Promise.race([
+        find,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), TIMEOUT_MS)),
+      ])
     } catch {
       return null
     }
-    return null
   }
 
   /**
@@ -436,6 +557,90 @@ export class MeshNode extends EventEmitter {
    */
   get isRunning(): boolean {
     return this.node !== null
+  }
+
+  /**
+   * Diagnostic — returns gossipsub mesh state for the current topic.
+   * Used by RPC /diag to debug message propagation issues on small benches.
+   */
+  /** Diagnostic — list protocols THIS node advertises via identify. */
+  getSelfProtocols(): string[] {
+    if (!this.node) return []
+    try {
+      const protos = (this.node as unknown as { getProtocols: () => string[] }).getProtocols()
+      return protos
+    } catch {
+      return []
+    }
+  }
+
+  /** Diagnostic — list libp2p connections + protocols negotiated per peer. */
+  async getConnectionDiagnostic(): Promise<Array<{
+    peerId: string
+    activeStreams: string[]
+    streamCount: number
+    remoteProtocols: string[]
+  }>> {
+    if (!this.node) return []
+    const node = this.node as unknown as {
+      getConnections: () => Array<{
+        remotePeer: { toString: () => string }
+        streams: Array<{ protocol?: string }>
+      }>
+      peerStore: {
+        get: (peerId: unknown) => Promise<{ protocols?: string[] } | undefined>
+      }
+    }
+    const connections = node.getConnections()
+    const out: Array<{
+      peerId: string
+      activeStreams: string[]
+      streamCount: number
+      remoteProtocols: string[]
+    }> = []
+    for (const c of connections) {
+      let remoteProtocols: string[] = []
+      try {
+        const peer = await node.peerStore.get(c.remotePeer as unknown as object)
+        remoteProtocols = peer?.protocols ?? []
+      } catch {
+        remoteProtocols = []
+      }
+      out.push({
+        peerId: c.remotePeer.toString(),
+        activeStreams: c.streams.map((s) => s.protocol ?? '?'),
+        streamCount: c.streams.length,
+        remoteProtocols,
+      })
+    }
+    return out
+  }
+
+  getGossipDiagnostic(): {
+    topic: string
+    selfTopics: string[]
+    subscribers: string[]
+    meshPeers: string[]
+    allPubsubPeers: string[]
+  } {
+    const pubsub = this.getPubsub() as unknown as {
+      getTopics?: () => string[]
+      getSubscribers?: (topic: string) => Array<{ toString: () => string }>
+      getMeshPeers?: (topic: string) => string[]
+      getPeers?: () => Array<{ toString: () => string }>
+    } | null
+    if (!pubsub) return { topic: this.topic, selfTopics: [], subscribers: [], meshPeers: [], allPubsubPeers: [] }
+    const selfTopics = typeof pubsub.getTopics === 'function' ? pubsub.getTopics() : []
+    const subscribers = typeof pubsub.getSubscribers === 'function'
+      ? pubsub.getSubscribers(this.topic).map((p) => p.toString())
+      : []
+    const meshPeers = typeof pubsub.getMeshPeers === 'function'
+      ? pubsub.getMeshPeers(this.topic).map((p) => p.toString())
+      : []
+    const allPubsubPeers = typeof pubsub.getPeers === 'function'
+      ? pubsub.getPeers().map((p) => p.toString())
+      : []
+    return { topic: this.topic, selfTopics, subscribers, meshPeers, allPubsubPeers }
   }
 
   /**

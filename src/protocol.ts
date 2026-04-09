@@ -33,6 +33,14 @@ export class MeshProtocol {
     if (typeof this.node.setFetchHandler === 'function') {
       this.node.setFetchHandler((contentHash) => this.store.get(contentHash))
     }
+
+    // Receive direct PUSH propagation from peers — same verification path as
+    // gossip handlePut (hash check, version check, store).
+    if (typeof this.node.setPushHandler === 'function') {
+      this.node.setPushHandler((item: MeshItem) => {
+        this.handlePut({ type: 'put', metadata: item.metadata, blob: item.blob })
+      })
+    }
   }
 
   /**
@@ -70,13 +78,11 @@ export class MeshProtocol {
     // peers use findProviders(contentHash) to discover us via fetchFromPeer).
     await this.node.provideContent(contentHash).catch(() => { /* best-effort */ })
 
-    // Gossip the full item to peers
-    const gossipMsg: GossipPutMessage = {
-      type: 'put',
-      metadata: fullMetadata,
-      blob,
+    // Direct push to all currently connected peers — primary propagation
+    // channel. Bypasses gossipsub entirely; uses libp2p streams.
+    if (typeof this.node.pushToAll === 'function') {
+      await this.node.pushToAll({ metadata: fullMetadata, blob }).catch(() => 0)
     }
-    await this.node.publish(gossipMsg)
 
     // Emit event
     this.node.emit('mesh:event', {
