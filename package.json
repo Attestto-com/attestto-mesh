@@ -29,7 +29,8 @@
     "lint": "eslint src tests",
     "demo": "tsx demo/proof-of-logic.ts",
     "demo:alpha": "tsx demo/proof-of-logic.ts --role alpha --port 4001",
-    "demo:beta": "tsx demo/proof-of-logic.ts --role beta"
+    "demo:beta": "tsx demo/proof-of-logic.ts --role beta",
+    "prepublishOnly": "pnpm run lint && pnpm test && pnpm run build"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
