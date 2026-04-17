@@ -221,13 +221,11 @@ export class MeshProtocol {
     }
   }
 
-  private handleTombstone(msg: GossipTombstoneMessage): void {
-    // SECURITY: Tombstone signature MUST be verified against the DID document
-    // before deleting any data. Until DID resolution is wired in, tombstones
-    // from remote peers are rejected entirely to prevent unauthorized data
-    // destruction. Only local tombstones (via tombstone()) are trusted.
-    void msg
-    return
+  private handleTombstone(_msg: GossipTombstoneMessage): void {
+    // SECURITY: Remote tombstones are rejected until DID resolution is wired
+    // in for signature verification. Without verifying the tombstone signature
+    // against the DID document, any peer could delete any data. Only local
+    // tombstones (via tombstone()) are trusted — they use the owning keypair.
   }
 
   /**
