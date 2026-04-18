@@ -103,6 +103,12 @@ export class MeshRpcServer {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
     const method = req.method ?? 'GET'
 
+    if (method === 'GET' && url.pathname === '/health') {
+      const running = this.node.isRunning
+      this.send(res, running ? 200 : 503, { status: running ? 'ok' : 'degraded', peerId: this.node.peerId })
+      return
+    }
+
     if (method === 'GET' && url.pathname === '/status') {
       this.send(res, 200, this.node.getStatus())
       return
