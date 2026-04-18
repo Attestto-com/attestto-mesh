@@ -18,6 +18,9 @@
  *   MESH_RPC_PORT        HTTP RPC port (default 0 = disabled)
  *   MESH_RPC_BIND        HTTP RPC bind address (default 127.0.0.1)
  *   MESH_RPC_TOKEN       Bearer token, REQUIRED if RPC bind is non-loopback
+ *   SOLANA_RPC_URL       Solana JSON-RPC endpoint for real anchoring (optional)
+ *   SOLANA_KEYPAIR_PATH  Path to Solana keypair JSON file (required if SOLANA_RPC_URL set)
+ *   SOLANA_COMMITMENT    Commitment level: processed|confirmed|finalized (default confirmed)
  */
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
@@ -33,6 +36,7 @@ import { MeshStore } from './store.js'
 import { MeshProtocol } from './protocol.js'
 import { MeshGC } from './gc.js'
 import { MeshRpcServer } from './rpc.js'
+import type { AnchorAdapter } from './anchor.js'
 
 const env = process.env
 const DATA_DIR = env.MESH_DATA_DIR ?? '/data/mesh'
@@ -89,6 +93,29 @@ async function main(): Promise<void> {
 
   mkdirSync(DATA_DIR, { recursive: true })
 
+  // ── Solana anchor adapter (optional) ──────────────────────────────
+  let anchorAdapter: AnchorAdapter | null = null
+  const solanaRpcUrl = env.SOLANA_RPC_URL
+  const solanaKeypairPath = env.SOLANA_KEYPAIR_PATH
+  const solanaCommitment = (env.SOLANA_COMMITMENT ?? 'confirmed') as 'confirmed' | 'finalized'
+
+  if (solanaRpcUrl) {
+    if (!solanaKeypairPath) {
+      throw new Error('SOLANA_KEYPAIR_PATH is required when SOLANA_RPC_URL is set')
+    }
+    const keypairJson = JSON.parse(readFileSync(solanaKeypairPath, 'utf-8'))
+    const keypairBytes = new Uint8Array(keypairJson)
+    const { SolanaMemoAdapter } = await import('./solana-adapter.js')
+    anchorAdapter = new SolanaMemoAdapter({
+      rpcUrl: solanaRpcUrl,
+      keypairBytes,
+      commitment: solanaCommitment,
+    })
+    log(`Solana anchoring: ENABLED (${solanaRpcUrl}, ${solanaCommitment})`)
+  } else {
+    log(`Solana anchoring: disabled (set SOLANA_RPC_URL to enable)`)
+  }
+
   const privateKey = await loadOrCreatePrivateKey(DATA_DIR)
 
   const store = new MeshStore(DATA_DIR, MAX_STORAGE_BYTES)
@@ -111,6 +138,10 @@ async function main(): Promise<void> {
 
   const protocol = new MeshProtocol(node, store)
   const gc = new MeshGC(store, node)
+
+  if (anchorAdapter) {
+    log(`Anchor adapter ready: ${anchorAdapter.name}`)
+  }
 
   await node.start()
 
