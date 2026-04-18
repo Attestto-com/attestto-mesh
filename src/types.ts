@@ -135,7 +135,7 @@ export interface MeshNodeConfig {
  */
 export const PUBLIC_BOOTSTRAP_PEERS: readonly string[] = [
   // attestto-anchor-cr — Fly.io dfw (Dallas), via Cloudflare DNS-only CNAME.
-  '/dns4/anchor.attestto.org/tcp/4001/p2p/12D3KooWCrRxaNTcvbK8HatLgyq3NsuqBRqY32PaUH9wgpHmLtCw',
+  '/dns4/mesh.attestto.net/tcp/4001/p2p/12D3KooWCrRxaNTcvbK8HatLgyq3NsuqBRqY32PaUH9wgpHmLtCw',
 ]
 
 export const DEFAULT_CONFIG: MeshNodeConfig = {
