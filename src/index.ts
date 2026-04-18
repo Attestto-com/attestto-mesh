@@ -21,6 +21,13 @@ export type {
   GossipMessage,
   GossipPutMessage,
   GossipTombstoneMessage,
+  GossipChatMessage,
+  GossipChatAckMessage,
+  GossipChatDeleteMessage,
+  ChatAttachment,
+  ChatVaultReference,
+  ChatStructuredCard,
+  ChatEvent,
   ConflictCandidate,
 } from './types.js'
 
@@ -37,3 +44,4 @@ export type { AnchorAdapter } from './anchor.js'
 export { SolanaMemoAdapter } from './solana-adapter.js'
 export type { SolanaMemoAdapterConfig } from './solana-adapter.js'
 export { hashBlob, verifySignature } from './crypto.js'
+export { ChatStore } from './chat-store.js'

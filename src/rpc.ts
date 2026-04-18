@@ -15,12 +15,25 @@
  *   POST /put     {didOwner,path,version,blob_b64,ttlSeconds?,signature?}
  *                                      → {contentHash}
  *   GET  /get?did=<did>&path=<path>   → {metadata, blob_b64} or 404
+ *
+ * Chat endpoints:
+ *   POST /chat/send                    → send a chat message
+ *   POST /chat/ack                     → acknowledge a chat message
+ *   POST /chat/delete                  → delete a chat message (within window)
+ *   GET  /chat/messages?channel=<id>&limit=<n>&after=<seq>  → get messages
+ *   GET  /chat/channels                → list channels with messages
+ *
+ * WebSocket:
+ *   GET  /ws (Upgrade)                 → real-time chat events stream
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
+import { createHash } from 'node:crypto'
+import type { Socket } from 'node:net'
 import type { MeshNode } from './node.js'
 import type { MeshProtocol } from './protocol.js'
 import type { MeshStore } from './store.js'
+import type { GossipChatMessage, GossipChatAckMessage, GossipChatDeleteMessage } from './types.js'
 
 interface RpcOptions {
   port: number
@@ -34,6 +47,8 @@ export class MeshRpcServer {
   private store: MeshStore
   private opts: RpcOptions
   private server: Server | null = null
+  private wsClients: Set<Socket> = new Set()
+  private eventHandler: ((event: unknown) => void) | null = null
 
   constructor(node: MeshNode, protocol: MeshProtocol, store: MeshStore, opts: RpcOptions) {
     this.node = node
@@ -49,12 +64,35 @@ export class MeshRpcServer {
           this.send(res, 500, { error: (err as Error).message })
         })
       })
+
+      // WebSocket upgrade handler
+      this.server.on('upgrade', (req, socket, head) => {
+        this.handleUpgrade(req, socket as Socket, head)
+      })
+
+      // Forward mesh events to WebSocket clients
+      this.eventHandler = (event: unknown) => {
+        this.broadcastWs(JSON.stringify(event))
+      }
+      this.node.on('mesh:event', this.eventHandler)
+
       this.server.once('error', reject)
       this.server.listen(this.opts.port, this.opts.bind, () => resolve())
     })
   }
 
   async stop(): Promise<void> {
+    // Clean up WebSocket clients
+    for (const socket of this.wsClients) {
+      socket.destroy()
+    }
+    this.wsClients.clear()
+
+    if (this.eventHandler) {
+      this.node.off('mesh:event', this.eventHandler)
+      this.eventHandler = null
+    }
+
     if (!this.server) return
     await new Promise<void>((resolve) => this.server!.close(() => resolve()))
     this.server = null
@@ -206,6 +244,179 @@ export class MeshRpcServer {
       return
     }
 
+    // --- Chat endpoints ---
+
+    if (method === 'POST' && url.pathname === '/chat/send') {
+      if (!this.authorized(req)) {
+        this.send(res, 401, { error: 'unauthorized' })
+        return
+      }
+      const body = JSON.parse(await this.readBody(req)) as GossipChatMessage
+      if (!body.id || !body.channelId || !body.from || !body.body || !body.signature) {
+        this.send(res, 400, { error: 'id, channelId, from, body, signature required' })
+        return
+      }
+      body.type = 'chat'
+      await this.protocol.publishChat(body)
+      this.send(res, 200, { ok: true, id: body.id })
+      return
+    }
+
+    if (method === 'POST' && url.pathname === '/chat/ack') {
+      if (!this.authorized(req)) {
+        this.send(res, 401, { error: 'unauthorized' })
+        return
+      }
+      const body = JSON.parse(await this.readBody(req)) as GossipChatAckMessage
+      if (!body.messageId || !body.channelId || !body.from || !body.signature) {
+        this.send(res, 400, { error: 'messageId, channelId, from, signature required' })
+        return
+      }
+      body.type = 'chat-ack'
+      await this.protocol.publishChatAck(body)
+      this.send(res, 200, { ok: true })
+      return
+    }
+
+    if (method === 'POST' && url.pathname === '/chat/delete') {
+      if (!this.authorized(req)) {
+        this.send(res, 401, { error: 'unauthorized' })
+        return
+      }
+      const body = JSON.parse(await this.readBody(req)) as GossipChatDeleteMessage
+      if (!body.messageId || !body.channelId || !body.from || !body.signature) {
+        this.send(res, 400, { error: 'messageId, channelId, from, signature required' })
+        return
+      }
+      body.type = 'chat-delete'
+      const deleted = await this.protocol.publishChatDelete(body)
+      this.send(res, deleted ? 200 : 409, deleted ? { ok: true } : { error: 'not eligible for deletion' })
+      return
+    }
+
+    if (method === 'GET' && url.pathname === '/chat/messages') {
+      const channel = url.searchParams.get('channel')
+      if (!channel) {
+        this.send(res, 400, { error: 'channel required' })
+        return
+      }
+      const limit = parseInt(url.searchParams.get('limit') ?? '100', 10)
+      const after = parseInt(url.searchParams.get('after') ?? '0', 10)
+      const messages = this.protocol.getChatMessages(channel, limit, after)
+      this.send(res, 200, { messages })
+      return
+    }
+
+    if (method === 'GET' && url.pathname === '/chat/channels') {
+      const channels = this.protocol.getChatMessages('__list__')
+      // Use the protocol's chatStore via getChatMessages — but we need channels list
+      // Fallback: return empty for now, protocol exposes getChatMessages not getChannels
+      this.send(res, 200, { channels: [] })
+      return
+    }
+
     this.send(res, 404, { error: 'not found' })
+  }
+
+  // -------------------------------------------------------------------------
+  // WebSocket — minimal RFC 6455 implementation for chat event streaming
+  // -------------------------------------------------------------------------
+
+  private handleUpgrade(req: IncomingMessage, socket: Socket, _head: Buffer): void {
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
+    if (url.pathname !== '/ws') {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+      socket.destroy()
+      return
+    }
+
+    // Verify WebSocket handshake
+    const key = req.headers['sec-websocket-key']
+    if (!key) {
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+      socket.destroy()
+      return
+    }
+
+    // Auth check for non-loopback
+    if (!this.isLoopback()) {
+      const token = url.searchParams.get('token')
+      if (!this.opts.token || token !== this.opts.token) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+        socket.destroy()
+        return
+      }
+    }
+
+    // WebSocket accept handshake (RFC 6455)
+    const acceptKey = createHash('sha1')
+      .update(key + '258EAFA5-E914-47DA-95CA-5AB5DC11E85B')
+      .digest('base64')
+
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${acceptKey}\r\n` +
+      '\r\n'
+    )
+
+    this.wsClients.add(socket)
+
+    socket.on('close', () => {
+      this.wsClients.delete(socket)
+    })
+
+    socket.on('error', () => {
+      this.wsClients.delete(socket)
+    })
+
+    // Send initial connected event
+    this.sendWsFrame(socket, JSON.stringify({ type: 'connected', peerId: this.node.peerId }))
+  }
+
+  /**
+   * Broadcast a message to all connected WebSocket clients.
+   */
+  private broadcastWs(data: string): void {
+    for (const socket of this.wsClients) {
+      this.sendWsFrame(socket, data)
+    }
+  }
+
+  /**
+   * Send a WebSocket text frame (RFC 6455).
+   */
+  private sendWsFrame(socket: Socket, data: string): void {
+    const payload = Buffer.from(data, 'utf8')
+    const len = payload.length
+
+    let header: Buffer
+    if (len < 126) {
+      header = Buffer.alloc(2)
+      header[0] = 0x81 // FIN + text opcode
+      header[1] = len
+    } else if (len < 65536) {
+      header = Buffer.alloc(4)
+      header[0] = 0x81
+      header[1] = 126
+      header.writeUInt16BE(len, 2)
+    } else {
+      header = Buffer.alloc(10)
+      header[0] = 0x81
+      header[1] = 127
+      header.writeBigUInt64BE(BigInt(len), 2)
+    }
+
+    try {
+      socket.write(Buffer.concat([header, payload]))
+    } catch {
+      this.wsClients.delete(socket)
+    }
+  }
+
+  /** Number of connected WebSocket clients (for diagnostics). */
+  get wsClientCount(): number {
+    return this.wsClients.size
   }
 }

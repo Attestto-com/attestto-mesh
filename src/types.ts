@@ -207,6 +207,9 @@ export type MeshEvent =
 export type GossipMessage =
   | GossipPutMessage
   | GossipTombstoneMessage
+  | GossipChatMessage
+  | GossipChatAckMessage
+  | GossipChatDeleteMessage
 
 export interface GossipPutMessage {
   type: 'put'
@@ -223,6 +226,88 @@ export interface GossipTombstoneMessage {
   ttlSeconds: number
   timestamp: number
 }
+
+// ---------------------------------------------------------------------------
+// Chat messages — Attestto Chat signed negotiation channel
+// ---------------------------------------------------------------------------
+
+export interface GossipChatMessage {
+  type: 'chat'
+  /** ULID message identifier */
+  id: string
+  /** Channel identifier (shared between participants) */
+  channelId: string
+  /** Sender DID (e.g. did:sns:eduardo.attestto.sol) */
+  from: string
+  /** Encrypted message body (XChaCha20-Poly1305 ciphertext, base64) */
+  body: string
+  /** ISO 8601 timestamp */
+  timestamp: string
+  /** Monotonic sequence number per sender per channel */
+  sequence: number
+  /** Optional reply-to message ID */
+  replyTo?: string
+  /** Optional structured attachment (vault reference or module card) */
+  attachment?: ChatAttachment
+  /** Ed25519 signature by sender's DID key */
+  signature: string
+}
+
+export type ChatAttachment =
+  | ChatVaultReference
+  | ChatStructuredCard
+
+export interface ChatVaultReference {
+  type: 'vault-reference'
+  credentialId: string
+  credentialType: string
+  credentialHash: string
+  summary: string
+}
+
+export interface ChatStructuredCard {
+  type: 'structured-card'
+  moduleId: string
+  cardType: string
+  data: Record<string, unknown>
+  signature: string
+}
+
+/** Acknowledgment message — confirms receipt of a chat message */
+export interface GossipChatAckMessage {
+  type: 'chat-ack'
+  /** ID of the message being acknowledged */
+  messageId: string
+  /** Channel ID */
+  channelId: string
+  /** DID of the acknowledger */
+  from: string
+  /** Timestamp of acknowledgment */
+  timestamp: string
+  /** Ed25519 signature */
+  signature: string
+}
+
+/** Chat tombstone — retract a message within the deletion window */
+export interface GossipChatDeleteMessage {
+  type: 'chat-delete'
+  /** ID of the message to delete */
+  messageId: string
+  /** Channel ID */
+  channelId: string
+  /** DID of the message author (only author can delete) */
+  from: string
+  /** Timestamp of deletion request */
+  timestamp: string
+  /** Ed25519 signature */
+  signature: string
+}
+
+/** Chat event types emitted by the mesh node */
+export type ChatEvent =
+  | { type: 'chat:received'; channelId: string; messageId: string; from: string }
+  | { type: 'chat:ack'; channelId: string; messageId: string; from: string }
+  | { type: 'chat:deleted'; channelId: string; messageId: string; from: string }
 
 // ---------------------------------------------------------------------------
 // Conflict resolution

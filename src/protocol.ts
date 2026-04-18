@@ -9,7 +9,11 @@
 
 import type { MeshNode } from './node.js'
 import type { MeshStore } from './store.js'
-import type { MeshItemMetadata, MeshItem, GossipPutMessage, GossipTombstoneMessage, GossipMessage } from './types.js'
+import type { ChatStore } from './chat-store.js'
+import type {
+  MeshItemMetadata, MeshItem, GossipPutMessage, GossipTombstoneMessage,
+  GossipChatMessage, GossipChatAckMessage, GossipChatDeleteMessage, GossipMessage,
+} from './types.js'
 import { meshKeyToString } from './types.js'
 import { hashBlob } from './crypto.js'
 import { resolveConflict } from './conflict.js'
@@ -17,10 +21,12 @@ import { resolveConflict } from './conflict.js'
 export class MeshProtocol {
   private node: MeshNode
   private store: MeshStore
+  private chatStore: ChatStore | null
 
-  constructor(node: MeshNode, store: MeshStore) {
+  constructor(node: MeshNode, store: MeshStore, chatStore?: ChatStore) {
     this.node = node
     this.store = store
+    this.chatStore = chatStore ?? null
 
     // Listen for incoming gossip messages
     this.node.on('gossip:message', (msg: GossipMessage) => {
@@ -174,6 +180,79 @@ export class MeshProtocol {
   // Gossip message handler
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // Chat — publish a signed chat message to the channel
+  // -------------------------------------------------------------------------
+
+  /**
+   * Publish a chat message to the mesh network.
+   */
+  async publishChat(msg: GossipChatMessage): Promise<void> {
+    // Store locally
+    if (this.chatStore) {
+      this.chatStore.putMessage(msg)
+    }
+
+    // Propagate via gossipsub
+    await this.node.publish(msg)
+
+    this.node.emit('mesh:event', {
+      type: 'chat:received',
+      channelId: msg.channelId,
+      messageId: msg.id,
+      from: msg.from,
+    })
+  }
+
+  /**
+   * Publish an acknowledgment for a chat message.
+   */
+  async publishChatAck(ack: GossipChatAckMessage): Promise<void> {
+    if (this.chatStore) {
+      this.chatStore.acknowledge(ack.messageId, ack.from, ack.timestamp)
+    }
+
+    await this.node.publish(ack)
+
+    this.node.emit('mesh:event', {
+      type: 'chat:ack',
+      channelId: ack.channelId,
+      messageId: ack.messageId,
+      from: ack.from,
+    })
+  }
+
+  /**
+   * Publish a delete request for a chat message (within 60s window, before ack).
+   */
+  async publishChatDelete(del: GossipChatDeleteMessage): Promise<boolean> {
+    if (!this.chatStore) return false
+
+    const deleted = this.chatStore.deleteMessage(del.messageId, del.from)
+    if (!deleted) return false
+
+    await this.node.publish(del)
+
+    this.node.emit('mesh:event', {
+      type: 'chat:deleted',
+      channelId: del.channelId,
+      messageId: del.messageId,
+      from: del.from,
+    })
+    return true
+  }
+
+  /**
+   * Get chat messages for a channel.
+   */
+  getChatMessages(channelId: string, limit = 100, afterSequence = 0): GossipChatMessage[] {
+    return this.chatStore?.getMessages(channelId, limit, afterSequence) ?? []
+  }
+
+  // -------------------------------------------------------------------------
+  // Gossip message handler
+  // -------------------------------------------------------------------------
+
   private handleGossipMessage(msg: GossipMessage): void {
     switch (msg.type) {
       case 'put':
@@ -181,6 +260,15 @@ export class MeshProtocol {
         break
       case 'tombstone':
         this.handleTombstone(msg)
+        break
+      case 'chat':
+        this.handleChat(msg)
+        break
+      case 'chat-ack':
+        this.handleChatAck(msg)
+        break
+      case 'chat-delete':
+        this.handleChatDelete(msg)
         break
     }
   }
@@ -237,5 +325,52 @@ export class MeshProtocol {
     if (deleted > 0) {
       this.node.updateStorageMetrics(this.store.getUsage())
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Chat message handlers (incoming from gossip)
+  // -------------------------------------------------------------------------
+
+  private handleChat(msg: GossipChatMessage): void {
+    if (!this.chatStore) return
+
+    // Deduplicate — if we already have this message, skip
+    const stored = this.chatStore.putMessage(msg)
+    if (!stored) return
+
+    this.node.emit('mesh:event', {
+      type: 'chat:received',
+      channelId: msg.channelId,
+      messageId: msg.id,
+      from: msg.from,
+    })
+  }
+
+  private handleChatAck(msg: GossipChatAckMessage): void {
+    if (!this.chatStore) return
+
+    const acked = this.chatStore.acknowledge(msg.messageId, msg.from, msg.timestamp)
+    if (!acked) return
+
+    this.node.emit('mesh:event', {
+      type: 'chat:ack',
+      channelId: msg.channelId,
+      messageId: msg.messageId,
+      from: msg.from,
+    })
+  }
+
+  private handleChatDelete(msg: GossipChatDeleteMessage): void {
+    if (!this.chatStore) return
+
+    const deleted = this.chatStore.deleteMessage(msg.messageId, msg.from)
+    if (!deleted) return
+
+    this.node.emit('mesh:event', {
+      type: 'chat:deleted',
+      channelId: msg.channelId,
+      messageId: msg.messageId,
+      from: msg.from,
+    })
   }
 }
