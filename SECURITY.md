@@ -19,9 +19,9 @@ We deeply appreciate the efforts of the security community in helping us maintai
 ### Where to report
 Please report security vulnerabilities **privately**. Do **not** open a public GitHub issue for a security vulnerability. 
 
-To report a vulnerability, please contact the maintainer directly via GitHub:
-- **GitHub User:** [@atrumin16](https://github.com/atrumin16)
-- **Method:** You can send a Direct Message (DM) through GitHub or use the **[Private Vulnerability Reporting](https://github.com/atrumin16/your-repo/security/advisories/new)** tool if available on the repository.
+To report a vulnerability, please use the **[Private Vulnerability Reporting](../../security/advisories/new)** tool directly on this repository. This ensures your report is encrypted and only visible to the maintainers.
+
+If you have questions about the process before submitting a report, you can reach out to the maintainer [@atrumin16](https://github.com/atrumin16) via GitHub Discussions (if enabled).
 
 ### What to include
 To help us triage your report quickly, please include as much of the following information as possible:
