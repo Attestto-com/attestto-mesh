@@ -17,6 +17,7 @@ import { yamux } from '@chainsafe/libp2p-yamux'
 import { kadDHT } from '@libp2p/kad-dht'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { bootstrap } from '@libp2p/bootstrap'
+import { mdns } from '@libp2p/mdns'
 import { identify } from '@libp2p/identify'
 import { ping } from '@libp2p/ping'
 import { circuitRelayTransport, circuitRelayServer } from '@libp2p/circuit-relay-v2'
@@ -153,6 +154,15 @@ export class MeshNode extends EventEmitter {
       )
     }
 
+    // mDNS: zero-config discovery for same-LAN nodes. serviceTag is scoped by
+    // meshId so a node on one mesh doesn't auto-dial an unrelated mesh sharing
+    // the network. Only useful when listening on a non-loopback address.
+    if (this.config.enableMdns) {
+      peerDiscovery.push(
+        mdns({ serviceTag: `attestto-mesh-${this.config.meshId}` })
+      )
+    }
+
     // Transports: TCP always, relay client for NAT traversal
     const transports: Array<unknown> = [tcp()]
     if (this.config.enableRelayClient) {
@@ -182,6 +192,22 @@ export class MeshNode extends EventEmitter {
       this.peerRates.delete(peerId)
       this.emitMeshEvent({ type: 'peer:disconnected', peerId })
     })
+
+    // mDNS-discovered peers are NOT auto-dialed: only @libp2p/bootstrap tags its
+    // peers with the keep-alive tag that makes the connection manager connect.
+    // mDNS just drops the peer + its LAN multiaddrs into the peerstore. So when
+    // mDNS is on, explicitly dial what it finds to actually form the local link.
+    // libp2p dedupes concurrent/duplicate dials, so this is safe next to
+    // bootstrap/DHT and harmless if the peer is already connected.
+    if (this.config.enableMdns) {
+      this.node.addEventListener('peer:discovery', (evt) => {
+        const { id, multiaddrs } = evt.detail
+        const target = multiaddrs.length > 0 ? multiaddrs : id
+        void (this.node as unknown as { dial: (a: unknown) => Promise<unknown> })
+          .dial(target)
+          .catch(() => { /* peer may be gone; mDNS will re-announce and retry */ })
+      })
+    }
 
     // Wire up gossipsub message listener (subscribe is deferred until AFTER
     // node.start() — subscribing on a not-yet-started node leaves the

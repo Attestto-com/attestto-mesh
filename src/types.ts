@@ -121,6 +121,16 @@ export interface MeshNodeConfig {
 
   /** Enable relay client (for nodes behind NAT — connects via relay nodes) */
   enableRelayClient: boolean
+
+  /**
+   * Enable mDNS local peer discovery (multicast UDP on the LAN).
+   * Lets same-network nodes find each other with NO bootstrap/anchor —
+   * offline, air-gapped, or demo use. Requires listenAddress = '0.0.0.0'
+   * (loopback multicast discovers nothing). Off by default: mDNS announces a
+   * node's presence to everything on the LAN, and many managed networks block
+   * multicast (client isolation) so it silently finds nothing there.
+   */
+  enableMdns: boolean
 }
 
 /**
@@ -152,6 +162,7 @@ export const DEFAULT_CONFIG: MeshNodeConfig = {
   meshId: 'attestto-cr',
   enableRelayServer: false,
   enableRelayClient: true,
+  enableMdns: false,
 }
 
 // ---------------------------------------------------------------------------
