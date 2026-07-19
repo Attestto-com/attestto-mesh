@@ -16,6 +16,7 @@ import { MeshNode } from '../src/node.js'
 import { MockAnchorAdapter } from '../src/anchor.js'
 import { DEFAULT_CONFIG } from '../src/types.js'
 import { hashBlob, signData } from '../src/crypto.js'
+import { didKeyFromEd25519, signPutMetadata } from '../src/verify.js'
 import { generateKeyPairSync } from 'node:crypto'
 import type { MeshItemMetadata, GossipTombstoneMessage, GossipPutMessage } from '../src/types.js'
 
@@ -258,16 +259,32 @@ describe('SEC-06: oversized gossip payloads are dropped before decode', () => {
     rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('a valid 10 KB put gossip message is accepted', () => {
+  it('a valid signed put gossip message is accepted', async () => {
+    // SOC-59: a put is only accepted when signed by its owning DID. Use a
+    // did:key identity (offline-resolvable) and a real signature.
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+    const pub = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32)
+    const priv = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32)
+
     const blob = new Uint8Array(50).fill(9)
+    const contentHash = hashBlob(blob)
+    const metadata = makeMetadata({ contentHash, didOwner: didKeyFromEd25519(pub) })
+    metadata.signature = await signPutMetadata(metadata, priv)
+
+    fakeNode.emit('gossip:message', { type: 'put', metadata, blob } as GossipPutMessage)
+    expect(store.has(contentHash)).toBe(true)
+  })
+
+  it('an unsigned put gossip message is rejected (SOC-59)', () => {
+    const blob = new Uint8Array(50).fill(8)
     const contentHash = hashBlob(blob)
     const msg: GossipPutMessage = {
       type: 'put',
-      metadata: makeMetadata({ contentHash }),
+      metadata: makeMetadata({ contentHash }), // signature: 'placeholder'
       blob,
     }
     fakeNode.emit('gossip:message', msg)
-    expect(store.has(contentHash)).toBe(true)
+    expect(store.has(contentHash)).toBe(false)
   })
 })
 

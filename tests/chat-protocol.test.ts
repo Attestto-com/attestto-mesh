@@ -12,6 +12,8 @@ import { MeshStore } from '../src/store.js'
 import { ChatStore } from '../src/chat-store.js'
 import { MeshProtocol } from '../src/protocol.js'
 import type { MeshNode } from '../src/node.js'
+import { generateKeyPairSync } from 'node:crypto'
+import { didKeyFromEd25519, signChatMessage, signChatAck, signChatDelete } from '../src/verify.js'
 import type { GossipChatMessage, GossipChatAckMessage, GossipChatDeleteMessage } from '../src/types.js'
 
 class FakeNode extends EventEmitter {
@@ -25,18 +27,34 @@ class FakeNode extends EventEmitter {
   isRunning = true
 }
 
+// Shared sender identity (did:key — offline-resolvable). Inbound gossip tests
+// sign with this key; SOC-59 verification runs against its did:key.
+const ALICE = (() => {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+  const pub = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32)
+  const priv = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32)
+  return { did: didKeyFromEd25519(pub), priv }
+})()
+
 function makeChat(overrides: Partial<GossipChatMessage> = {}): GossipChatMessage {
   return {
     type: 'chat',
     id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     channelId: 'channel-1',
-    from: 'did:sns:alice.attestto.sol',
+    from: ALICE.did,
     body: 'encrypted-body',
     timestamp: new Date().toISOString(),
     sequence: 1,
     signature: 'sig-placeholder',
     ...overrides,
   }
+}
+
+/** A chat message signed by ALICE, ready for inbound gossip verification. */
+async function makeSignedChat(overrides: Partial<GossipChatMessage> = {}): Promise<GossipChatMessage> {
+  const msg = makeChat(overrides)
+  msg.signature = await signChatMessage(msg, ALICE.priv)
+  return msg
 }
 
 describe('Chat Protocol Handlers', () => {
@@ -91,27 +109,27 @@ describe('Chat Protocol Handlers', () => {
   })
 
   describe('handleChat (via gossip)', () => {
-    it('stores incoming chat messages from gossip', () => {
-      const msg = makeChat({ id: 'gossip-msg-1' })
+    it('stores incoming chat messages from gossip', async () => {
+      const msg = await makeSignedChat({ id: 'gossip-msg-1' })
       fakeNode.emit('gossip:message', msg)
 
       const stored = chatStore.getMessage('gossip-msg-1')
       expect(stored).not.toBeNull()
     })
 
-    it('deduplicates messages', () => {
-      const msg = makeChat({ id: 'dup-msg' })
+    it('deduplicates messages', async () => {
+      const msg = await makeSignedChat({ id: 'dup-msg' })
       fakeNode.emit('gossip:message', msg)
       fakeNode.emit('gossip:message', msg)
 
       expect(chatStore.getMessageCount('channel-1')).toBe(1)
     })
 
-    it('emits event only for new messages', () => {
+    it('emits event only for new messages', async () => {
       const events: unknown[] = []
       fakeNode.on('mesh:event', (e: unknown) => events.push(e))
 
-      const msg = makeChat({ id: 'event-msg' })
+      const msg = await makeSignedChat({ id: 'event-msg' })
       fakeNode.emit('gossip:message', msg)
       fakeNode.emit('gossip:message', msg) // duplicate
 
@@ -162,20 +180,38 @@ describe('Chat Protocol Handlers', () => {
   })
 
   describe('handleChatAck (via gossip)', () => {
-    it('acknowledges message when ack arrives via gossip', () => {
+    it('acknowledges message when ack arrives via gossip', async () => {
       const msg = makeChat({ id: 'gossip-ack' })
+      chatStore.putMessage(msg)
+
+      const ack: GossipChatAckMessage = {
+        type: 'chat-ack',
+        messageId: 'gossip-ack',
+        channelId: 'channel-1',
+        from: ALICE.did,
+        timestamp: new Date().toISOString(),
+        signature: '',
+      }
+      ack.signature = await signChatAck(ack, ALICE.priv)
+      fakeNode.emit('gossip:message', ack)
+
+      expect(chatStore.isAcknowledged('gossip-ack')).toBe(true)
+    })
+
+    it('rejects an ack with an invalid signature (SOC-59)', async () => {
+      const msg = makeChat({ id: 'unsigned-ack' })
       chatStore.putMessage(msg)
 
       fakeNode.emit('gossip:message', {
         type: 'chat-ack',
-        messageId: 'gossip-ack',
+        messageId: 'unsigned-ack',
         channelId: 'channel-1',
-        from: 'did:sns:bob.attestto.sol',
+        from: ALICE.did,
         timestamp: new Date().toISOString(),
-        signature: 'sig',
-      })
+        signature: 'not-a-real-sig',
+      } as GossipChatAckMessage)
 
-      expect(chatStore.isAcknowledged('gossip-ack')).toBe(true)
+      expect(chatStore.isAcknowledged('unsigned-ack')).toBe(false)
     })
   })
 
@@ -234,21 +270,40 @@ describe('Chat Protocol Handlers', () => {
   })
 
   describe('handleChatDelete (via gossip)', () => {
-    it('deletes message when delete arrives via gossip', () => {
+    it('deletes message when a signed delete arrives via gossip', async () => {
       const msg = makeChat({ id: 'gossip-del' })
       chatStore.putMessage(msg)
 
-      fakeNode.emit('gossip:message', {
+      const del: GossipChatDeleteMessage = {
         type: 'chat-delete',
         messageId: 'gossip-del',
         channelId: 'channel-1',
         from: msg.from,
         timestamp: new Date().toISOString(),
-        signature: 'sig',
-      })
+        signature: '',
+      }
+      del.signature = await signChatDelete(del, ALICE.priv)
+      fakeNode.emit('gossip:message', del)
 
       // Message is soft-deleted — won't appear in getMessages
       expect(chatStore.getMessages('channel-1')).toHaveLength(0)
+    })
+
+    it('rejects a delete with an invalid signature (SOC-59)', () => {
+      const msg = makeChat({ id: 'protected-del' })
+      chatStore.putMessage(msg)
+
+      fakeNode.emit('gossip:message', {
+        type: 'chat-delete',
+        messageId: 'protected-del',
+        channelId: 'channel-1',
+        from: msg.from,
+        timestamp: new Date().toISOString(),
+        signature: 'forged',
+      } as GossipChatDeleteMessage)
+
+      // Still present — unsigned delete rejected.
+      expect(chatStore.getMessages('channel-1').some((m) => m.id === 'protected-del')).toBe(true)
     })
   })
 
