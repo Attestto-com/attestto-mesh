@@ -308,9 +308,8 @@ export class MeshRpcServer {
     }
 
     if (method === 'GET' && url.pathname === '/chat/channels') {
-      const channels = this.protocol.getChatMessages('__list__')
-      // Use the protocol's chatStore via getChatMessages — but we need channels list
-      // Fallback: return empty for now, protocol exposes getChatMessages not getChannels
+      // The protocol exposes getChatMessages, not a channels listing yet — return
+      // empty until a getChannels API exists.
       this.send(res, 200, { channels: [] })
       return
     }
