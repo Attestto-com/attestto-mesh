@@ -11,7 +11,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - **MeshNode:** libp2p networking with gossipsub, Kademlia DHT, TCP/WebRTC transports, circuit relay, per-peer rate limiting (50 msg/sec), 64 KB payload caps.
 - **MeshStore:** SQLite-backed local storage with content-addressed blobs (SHA-256), versioning, TTL expiration, LRU tracking, DID-scoped queries.
 - **MeshProtocol:** PUT/GET/TOMBSTONE operations with three-layer resolution (L1 local, L2 DHT, L3 peer fetch). Hash re-verification on fetch. Conflict resolution favoring Solana anchors.
-- **MeshGC:** Garbage collection with TTL expiration, version pruning (keep canonical + 1 rollback), LRU eviction with DHT holder-count safety rail (ATT-299 — refuses eviction if fewer than 6 peers hold the blob).
+- **MeshGC:** Garbage collection with TTL expiration, version pruning (keep canonical + 1 rollback), LRU eviction with DHT holder-count safety rail (ATT-299), which refuses eviction if fewer than 6 peers hold the blob.
 - **MeshRpcServer:** Local HTTP server for status, metrics (Prometheus), diagnostics, and PUT/GET operations. Bearer auth required for non-loopback binds.
 - **Anchor adapter pattern:** pluggable `AnchorAdapter` interface. `MockAnchorAdapter` with production guard. `anchorToSolana()` stub for future Solana integration.
 - **Crypto:** SHA-256 hashing, Ed25519 signing/verification with key zeroization.
