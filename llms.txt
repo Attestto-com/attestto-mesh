@@ -1,0 +1,164 @@
+# @attestto/mesh
+
+> Open-source, peer-to-peer data layer for sovereign identity. Keeps citizens' identity state available even when government servers go offline. Not a blockchain. Not a file system. A distributed state-sync layer for encrypted identity data.
+
+Part of the [Attestto Open](https://attestto.org) ecosystem.
+
+## What it is
+
+Traditional digital identity depends on servers. If those servers go down — hurricane, cyberattack, policy change — millions of people lose access to their identity.
+
+Attestto Mesh removes that single point of failure. Identity data is encrypted, fragmented across thousands of peers via a gossip protocol, and cryptographically anchored to Solana. No single entity — not Attestto, not a government, not a cloud provider — can shut it down.
+
+**Blind Courier principle:** every node stores encrypted data it mathematically cannot read. Privacy is a cryptographic guarantee, not a policy.
+
+## What gets stored
+
+| Data type | Size | Stored where |
+|---|---|---|
+| DID Documents | 1–2 KB | Mesh |
+| Verifiable Credentials | 1–5 KB | Mesh |
+| Secure Messages (DIDComm) | < 2 KB | Mesh (deleted on ack) |
+| Audit Receipts | < 500 B | Mesh (permanent) |
+| Private keys | < 1 KB | Device only — never leaves |
+| User preferences | 200 B | Device only |
+| Files (PDFs, videos) | large | Not stored — this is not a file system |
+
+**Total mesh footprint per citizen: ~120 KB.** A national mesh for 5 million people fits in ~600 GB distributed across thousands of nodes.
+
+## Three-layer resolution
+
+```
+1. Local cache    — 0ms      (data already on your device)
+2. Mesh peers     — <100ms   (DHT lookup, nearby nodes serve encrypted blobs)
+3. Solana anchor  — 200–500ms (cryptographic proof of existence and ordering)
+```
+
+If any layer fails, the others keep working. Graceful degradation by design.
+
+## Quick start
+
+```bash
+npm install @attestto/mesh
+```
+
+```typescript
+import { MeshNode, MeshStore, MeshProtocol } from '@attestto/mesh'
+
+// Initialize local storage (default 250 MB)
+const store = new MeshStore('/path/to/mesh/data')
+
+// Start a P2P node
+const node = new MeshNode({
+  dataDir: '/path/to/mesh/data',
+  bootstrapPeers: ['/ip4/203.0.113.1/tcp/4001/p2p/Qm...'],
+  listenPort: 4001,
+})
+await node.start()
+
+// Wire up the protocol layer
+const protocol = new MeshProtocol(node, store)
+
+// Publish encrypted data to the mesh
+const contentHash = await protocol.put({
+  didOwner: 'did:sns:maria.sol',
+  path: 'credentials/drivers-license',
+  version: 1,
+  ttlSeconds: 0,           // 0 = permanent
+  signature: '...',        // Ed25519 signature of payload by owner
+  encryptedPayload: '...',  // AES-256-GCM blob — nodes never see plaintext
+})
+
+// Retrieve
+const blob = await protocol.get({ didOwner: 'did:sns:maria.sol', path: 'credentials/drivers-license' })
+```
+
+## Architecture components
+
+| Component | Purpose | Technology |
+|---|---|---|
+| `MeshNode` | P2P networking, peer discovery, gossip | libp2p, Kademlia DHT, GossipSub |
+| `MeshStore` | Local encrypted blob storage with index | SQLite + flat `.enc` files |
+| `MeshProtocol` | PUT/GET/UPDATE/TOMBSTONE operations | Content-addressed, signature-verified |
+| `conflict.ts` | Deterministic version arbitration | Solana anchor > version > timestamp > hash |
+| `gc.ts` | Automatic cleanup with safety rails | TTL expiry, version pruning, LRU with 6-holder minimum |
+| `anchor.ts` | Immutable proof-of-existence | Solana Memo transactions (~$0.00025 each) |
+| `daemon.ts` | Background node process | Long-running service for desktop/server |
+
+## Protocol operations
+
+```
+PUT     didOwner + path + version + signature + encryptedPayload
+          → stores blob, gossips to peers, returns contentHash
+
+GET     didOwner + path
+          → tries local cache → mesh DHT → returns latest version blob
+
+UPDATE  didOwner + path + newVersion + signature + encryptedPayload
+          → conflict resolution via ordering rules, gossips update
+
+TOMBSTONE didOwner + path + signature
+          → marks deleted, propagates revocation in <500ms, GC eventually removes
+```
+
+## Conflict resolution ordering
+
+When two nodes have conflicting versions:
+1. Solana anchor timestamp (highest authority)
+2. Version number
+3. Timestamp
+4. Hash (deterministic tiebreaker)
+
+No central coordinator needed.
+
+## Country mesh configuration
+
+Each national mesh runs independently. Configure `bootstrapPeers` and `allowlist` to form a country-scoped network:
+
+```typescript
+const node = new MeshNode({
+  dataDir: '/var/mesh/cr',
+  bootstrapPeers: CR_BOOTSTRAP_PEERS,   // Costa Rica mesh entry points
+  listenPort: 4001,
+  maxStorageMB: 250,
+  countryCode: 'cr',
+})
+```
+
+`attestto-desktop` auto-detects country via system timezone and joins the correct national mesh.
+
+## Source layout
+
+```
+src/
+  index.ts     — public exports
+  node.ts      — MeshNode (libp2p wrapper)
+  store.ts     — MeshStore (SQLite + .enc files)
+  protocol.ts  — PUT/GET/UPDATE/TOMBSTONE
+  anchor.ts    — Solana Memo anchoring
+  conflict.ts  — version conflict resolution
+  gc.ts        — garbage collection
+  crypto.ts    — encryption helpers
+  rpc.ts       — local RPC for IPC with desktop app
+  daemon.ts    — background daemon process
+  types.ts     — TypeScript interfaces
+```
+
+## Standards
+
+- W3C DID Core 1.0 — DID Document storage and resolution
+- W3C VC Data Model v2.0 — credential storage format
+- DIDComm v2 — encrypted message transport
+- libp2p — P2P networking (Kademlia DHT, GossipSub)
+
+## Related repos
+
+| Repo | Purpose |
+|---|---|
+| `attestto-desktop` | Desktop app — each install is a mesh node (250 MB contribution) |
+| `attestto-anchor` | Solana hash anchoring service used by the mesh anchor layer |
+| `attestto-app` | Mobile PWA wallet — connects to mesh for credential sync and recovery |
+
+## License
+
+Apache 2.0 — [Attestto Open](https://attestto.org)

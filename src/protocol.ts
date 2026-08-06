@@ -9,18 +9,45 @@
 
 import type { MeshNode } from './node.js'
 import type { MeshStore } from './store.js'
-import type { MeshItemMetadata, MeshItem, GossipPutMessage, GossipTombstoneMessage, GossipMessage } from './types.js'
+import type { ChatStore } from './chat-store.js'
+import type {
+  MeshItemMetadata, MeshItem, GossipPutMessage, GossipTombstoneMessage,
+  GossipChatMessage, GossipChatAckMessage, GossipChatDeleteMessage, GossipMessage,
+} from './types.js'
 import { meshKeyToString } from './types.js'
 import { hashBlob } from './crypto.js'
+import {
+  resolveDidKey,
+  verifyPutSignature,
+  verifyChatSignature,
+  verifyChatAckSignature,
+  verifyChatDeleteSignature,
+} from './verify.js'
+import type { DidResolver } from './verify.js'
 import { resolveConflict } from './conflict.js'
+
+export interface MeshProtocolOptions {
+  /**
+   * Resolves a claimed DID to its Ed25519 public key for inbound signature
+   * verification. Defaults to {@link resolveDidKey} (handles `did:key` offline).
+   * Deployments that use network-resolved methods (e.g. `did:sns`) must inject a
+   * resolver backed by a synchronous key cache; DIDs it cannot resolve are
+   * rejected (fail-closed).
+   */
+  didResolver?: DidResolver
+}
 
 export class MeshProtocol {
   private node: MeshNode
   private store: MeshStore
+  private chatStore: ChatStore | null
+  private resolveDid: DidResolver
 
-  constructor(node: MeshNode, store: MeshStore) {
+  constructor(node: MeshNode, store: MeshStore, chatStore?: ChatStore, opts?: MeshProtocolOptions) {
     this.node = node
     this.store = store
+    this.chatStore = chatStore ?? null
+    this.resolveDid = opts?.didResolver ?? resolveDidKey
 
     // Listen for incoming gossip messages
     this.node.on('gossip:message', (msg: GossipMessage) => {
@@ -174,6 +201,79 @@ export class MeshProtocol {
   // Gossip message handler
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // Chat — publish a signed chat message to the channel
+  // -------------------------------------------------------------------------
+
+  /**
+   * Publish a chat message to the mesh network.
+   */
+  async publishChat(msg: GossipChatMessage): Promise<void> {
+    // Store locally
+    if (this.chatStore) {
+      this.chatStore.putMessage(msg)
+    }
+
+    // Propagate via gossipsub
+    await this.node.publish(msg)
+
+    this.node.emit('mesh:event', {
+      type: 'chat:received',
+      channelId: msg.channelId,
+      messageId: msg.id,
+      from: msg.from,
+    })
+  }
+
+  /**
+   * Publish an acknowledgment for a chat message.
+   */
+  async publishChatAck(ack: GossipChatAckMessage): Promise<void> {
+    if (this.chatStore) {
+      this.chatStore.acknowledge(ack.messageId, ack.from, ack.timestamp)
+    }
+
+    await this.node.publish(ack)
+
+    this.node.emit('mesh:event', {
+      type: 'chat:ack',
+      channelId: ack.channelId,
+      messageId: ack.messageId,
+      from: ack.from,
+    })
+  }
+
+  /**
+   * Publish a delete request for a chat message (within 60s window, before ack).
+   */
+  async publishChatDelete(del: GossipChatDeleteMessage): Promise<boolean> {
+    if (!this.chatStore) return false
+
+    const deleted = this.chatStore.deleteMessage(del.messageId, del.from)
+    if (!deleted) return false
+
+    await this.node.publish(del)
+
+    this.node.emit('mesh:event', {
+      type: 'chat:deleted',
+      channelId: del.channelId,
+      messageId: del.messageId,
+      from: del.from,
+    })
+    return true
+  }
+
+  /**
+   * Get chat messages for a channel.
+   */
+  getChatMessages(channelId: string, limit = 100, afterSequence = 0): GossipChatMessage[] {
+    return this.chatStore?.getMessages(channelId, limit, afterSequence) ?? []
+  }
+
+  // -------------------------------------------------------------------------
+  // Gossip message handler
+  // -------------------------------------------------------------------------
+
   private handleGossipMessage(msg: GossipMessage): void {
     switch (msg.type) {
       case 'put':
@@ -181,6 +281,15 @@ export class MeshProtocol {
         break
       case 'tombstone':
         this.handleTombstone(msg)
+        break
+      case 'chat':
+        this.handleChat(msg)
+        break
+      case 'chat-ack':
+        this.handleChatAck(msg)
+        break
+      case 'chat-delete':
+        this.handleChatDelete(msg)
         break
     }
   }
@@ -192,7 +301,15 @@ export class MeshProtocol {
     const computed = hashBlob(blob)
     if (computed !== metadata.contentHash) return // Corrupted — reject
 
-    // Check for version conflict
+    // SECURITY (SOC-59): the mesh is public. Proving the blob is intact is not
+    // proof that the sender controls `didOwner`. Require an Ed25519 signature by
+    // the owning DID before storing/propagating — otherwise any peer could write
+    // under any namespace or overwrite a victim's latest version. Fail-closed:
+    // unsigned or unresolvable writes are dropped, matching the tombstone model.
+    if (!verifyPutSignature(metadata, this.resolveDid)) return
+
+    // Check for version conflict — only after signature success, so an attacker
+    // cannot force-win conflict resolution with a forged higher version.
     const existing = this.store.getLatestByKey(metadata.didOwner, metadata.path)
     if (existing) {
       // Only accept if new version > existing AND valid
@@ -221,13 +338,11 @@ export class MeshProtocol {
     }
   }
 
-  private handleTombstone(msg: GossipTombstoneMessage): void {
-    // SECURITY: Tombstone signature MUST be verified against the DID document
-    // before deleting any data. Until DID resolution is wired in, tombstones
-    // from remote peers are rejected entirely to prevent unauthorized data
-    // destruction. Only local tombstones (via tombstone()) are trusted.
-    void msg
-    return
+  private handleTombstone(_msg: GossipTombstoneMessage): void {
+    // SECURITY: Remote tombstones are rejected until DID resolution is wired
+    // in for signature verification. Without verifying the tombstone signature
+    // against the DID document, any peer could delete any data. Only local
+    // tombstones (via tombstone()) are trusted — they use the owning keypair.
   }
 
   /**
@@ -239,5 +354,63 @@ export class MeshProtocol {
     if (deleted > 0) {
       this.node.updateStorageMetrics(this.store.getUsage())
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Chat message handlers (incoming from gossip)
+  // -------------------------------------------------------------------------
+
+  private handleChat(msg: GossipChatMessage): void {
+    if (!this.chatStore) return
+
+    // SECURITY (SOC-59): reject messages not signed by the claimed `from` DID —
+    // otherwise any peer can forge chat messages from any identity.
+    if (!verifyChatSignature(msg, this.resolveDid)) return
+
+    // Deduplicate — if we already have this message, skip
+    const stored = this.chatStore.putMessage(msg)
+    if (!stored) return
+
+    this.node.emit('mesh:event', {
+      type: 'chat:received',
+      channelId: msg.channelId,
+      messageId: msg.id,
+      from: msg.from,
+    })
+  }
+
+  private handleChatAck(msg: GossipChatAckMessage): void {
+    if (!this.chatStore) return
+
+    // SECURITY (SOC-59): the acknowledger must have signed the ack.
+    if (!verifyChatAckSignature(msg, this.resolveDid)) return
+
+    const acked = this.chatStore.acknowledge(msg.messageId, msg.from, msg.timestamp)
+    if (!acked) return
+
+    this.node.emit('mesh:event', {
+      type: 'chat:ack',
+      channelId: msg.channelId,
+      messageId: msg.messageId,
+      from: msg.from,
+    })
+  }
+
+  private handleChatDelete(msg: GossipChatDeleteMessage): void {
+    if (!this.chatStore) return
+
+    // SECURITY (SOC-59): a delete must be signed by the claimed author. Without
+    // this, `from` is attacker-supplied and any peer could delete any message.
+    if (!verifyChatDeleteSignature(msg, this.resolveDid)) return
+
+    const deleted = this.chatStore.deleteMessage(msg.messageId, msg.from)
+    if (!deleted) return
+
+    this.node.emit('mesh:event', {
+      type: 'chat:deleted',
+      channelId: msg.channelId,
+      messageId: msg.messageId,
+      from: msg.from,
+    })
   }
 }

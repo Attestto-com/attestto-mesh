@@ -4,7 +4,7 @@
  * SHA-256 hashing and Ed25519 signature verification.
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, createPublicKey, verify } from 'node:crypto'
 
 /**
  * SHA-256 hash of a blob, returned as hex string.
@@ -14,33 +14,43 @@ export function hashBlob(data: Uint8Array): string {
 }
 
 /**
- * Verify an Ed25519 signature.
+ * Verify an Ed25519 signature against a raw 32-byte public key (synchronous).
  *
- * Note: In production, this would use the DID document's verification method
- * to resolve the public key. For now, accepts the public key directly.
+ * Inbound gossip handlers run on the message hot path and stay synchronous, so
+ * verification must not require an await. The DID → public-key resolution is
+ * done by the caller (see `verify.ts`); this only checks the signature bytes.
+ */
+export function verifySignatureSync(
+  data: Uint8Array,
+  signature: string,
+  publicKey: Uint8Array
+): boolean {
+  try {
+    const keyObject = createPublicKey({
+      key: Buffer.concat([
+        // Ed25519 SPKI DER prefix
+        Buffer.from('302a300506032b6570032100', 'hex'),
+        Buffer.from(publicKey),
+      ]),
+      format: 'der',
+      type: 'spki',
+    })
+    return verify(null, data, keyObject, Buffer.from(signature, 'hex'))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Async wrapper around {@link verifySignatureSync}, retained for callers that
+ * already await it.
  */
 export async function verifySignature(
   data: Uint8Array,
   signature: string,
   publicKey: Uint8Array
 ): Promise<boolean> {
-  try {
-    const { verify } = await import('node:crypto')
-    const keyObject = await import('node:crypto').then((c) =>
-      c.createPublicKey({
-        key: Buffer.concat([
-          // Ed25519 DER prefix
-          Buffer.from('302a300506032b6570032100', 'hex'),
-          publicKey,
-        ]),
-        format: 'der',
-        type: 'spki',
-      })
-    )
-    return verify(null, data, keyObject, Buffer.from(signature, 'hex'))
-  } catch {
-    return false
-  }
+  return verifySignatureSync(data, signature, publicKey)
 }
 
 /**

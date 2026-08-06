@@ -32,8 +32,14 @@ services:
       MESH_RPC_PORT: ${MESH_RPC_PORT:-4101}
       MESH_RPC_BIND: 0.0.0.0
       MESH_RPC_TOKEN: ${MESH_RPC_TOKEN:-}
+      # Solana anchoring (optional — omit to disable)
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
+      SOLANA_KEYPAIR_PATH: ${SOLANA_KEYPAIR_PATH:-}
+      SOLANA_COMMITMENT: ${SOLANA_COMMITMENT:-confirmed}
     volumes:
       - mesh-data:/data/mesh
+      # Mount Solana keypair if anchoring is enabled
+      # - ./solana-keypair.json:/secrets/solana-keypair.json:ro
 
 volumes:
   mesh-data:
