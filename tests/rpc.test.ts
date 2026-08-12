@@ -9,7 +9,6 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createHash } from 'node:crypto'
 import * as http from 'node:http'
 import * as net from 'node:net'
 import { MeshStore } from '../src/store.js'
@@ -17,7 +16,6 @@ import { ChatStore } from '../src/chat-store.js'
 import { MeshProtocol } from '../src/protocol.js'
 import { MeshRpcServer } from '../src/rpc.js'
 import type { MeshNode } from '../src/node.js'
-import { hashBlob } from '../src/crypto.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

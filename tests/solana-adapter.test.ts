@@ -6,7 +6,7 @@
  * against devnet belong in a separate suite gated behind SOLANA_RPC_URL.
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { SolanaMemoAdapter, type SolanaMemoAdapterConfig } from '../src/solana-adapter.js'
 import { anchor } from '../src/anchor.js'
 
