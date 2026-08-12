@@ -27,6 +27,9 @@ jobs:
         with:
           version: 10
 
+      - name: Changelog gate
+        run: node scripts/ci-changelog.mjs
+
       - name: Install dependencies
         run: pnpm install
 
@@ -71,7 +74,20 @@ jobs:
       - name: Test with coverage
         run: pnpm test:coverage
 
+      # Skipped for Dependabot. GitHub gives Dependabot-triggered runs a
+      # SEPARATE secret store, so `secrets.SONAR_TOKEN` is empty there and the
+      # scanner fails with "Not authorized or project not found" — which reads
+      # like a bad token and is not one. #15, #6 and #3 all failed this way
+      # while #12 and #13 passed on the same token.
+      #
+      # The alternative is adding the token to the Dependabot secret store. Not
+      # doing that on purpose: a dependency bump changes the lockfile, not
+      # `src/`, so the scan has nothing new to say, and that separate store
+      # exists precisely because a Dependabot PR installs third-party code that
+      # has not been reviewed yet. Handing it a credential to remove a red X is
+      # the wrong trade.
       - name: SonarCloud Scan
+        if: github.actor != 'dependabot[bot]'
         uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
