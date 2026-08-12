@@ -1,6 +1,8 @@
 # attestto-mesh
 
 [![npm version](https://img.shields.io/npm/v/@attestto/mesh.svg)](https://www.npmjs.com/package/@attestto/mesh)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-db61a2)](https://github.com/sponsors/Attestto-com)
 
 > Public digital infrastructure for sovereign identity — a peer-to-peer data layer that keeps citizens' identity state available even when government servers go offline.
 

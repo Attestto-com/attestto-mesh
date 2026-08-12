@@ -599,7 +599,7 @@ export class MeshNode extends EventEmitter {
       remoteProtocols: string[]
     }> = []
     for (const c of connections) {
-      let remoteProtocols: string[] = []
+      let remoteProtocols: string[]
       try {
         const peer = await node.peerStore.get(c.remotePeer as unknown as object)
         remoteProtocols = peer?.protocols ?? []
