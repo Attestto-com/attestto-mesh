@@ -21,7 +21,29 @@ updates:
     # A dependency lands in the FIRST group it matches, so the minor/patch groups
     # are listed before the catch-all major group on purpose. Majors are separated
     # because they need a human to read a changelog; minors and patches do not.
+    # TypeScript 7 cannot be installed in this repo. `typescript-eslint` caps
+    # its peer at `>=4.8.4 <6.1.0` as of 8.67.0 (the current latest), so a
+    # major bump of `typescript` makes `npm ci` fail with ERESOLVE before any
+    # gate runs -- verified locally against attestto-x509-core#6, whose CI was
+    # red in 8s at the install step. No pin of typescript-eslint fixes it:
+    # support for TS 7 has not shipped at any version.
+    #
+    # Minors and patches still flow. REMOVE THIS ENTRY once typescript-eslint
+    # declares a peer range that admits TypeScript 7.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
+      # eslint and typescript-eslint are coupled by a peer range, so their
+      # majors have to move together or neither installs. Listed FIRST, and
+      # without an update-types filter, so every update to them lands here
+      # rather than being split across the dev and major groups.
+      lint-toolchain:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "typescript-eslint"
+          - "@typescript-eslint/*"
       production-dependencies:
         dependency-type: "production"
         update-types: ["minor", "patch"]
