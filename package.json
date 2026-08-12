@@ -30,7 +30,8 @@
     "demo": "tsx demo/proof-of-logic.ts",
     "demo:alpha": "tsx demo/proof-of-logic.ts --role alpha --port 4001",
     "demo:beta": "tsx demo/proof-of-logic.ts --role beta",
-    "prepublishOnly": "pnpm run lint && pnpm test && pnpm run build"
+    "prepublishOnly": "pnpm run lint && pnpm test && pnpm run build",
+    "gate-self-test": "node scripts/gate-self-test.mjs"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
@@ -102,5 +103,30 @@
     "gossipsub",
     "blind-courier",
     "national-resilience"
-  ]
+  ],
+  "gateSelfTest": {
+    "workflow": ".github/workflows/sonar.yml",
+    "testScript": "test",
+    "buildScript": "build",
+    "gates": [
+      {
+        "name": "lint",
+        "script": "lint",
+        "seed": "src/__gate-self-test__.ts",
+        "content": "export function seeded(): void {\n  const unused = 1\n}\n"
+      },
+      {
+        "name": "test",
+        "script": "test",
+        "seed": "tests/__gate-self-test__.spec.ts",
+        "content": "import { it, expect } from 'vitest'\nit('is a deliberate failure', () => { expect(1).toBe(2) })\n"
+      },
+      {
+        "name": "type-check",
+        "script": "type-check",
+        "seed": "src/__gate-self-test-types__.ts",
+        "content": "export const wrong: number = 'not a number'\n"
+      }
+    ]
+  }
 }

@@ -4,3 +4,13 @@ dist/
 .DS_Store
 *.log
 coverage/
+
+# Local secrets. `.gitignore` carried no env pattern at all, while an
+# untracked `.env` and `.env.bak` each held a live 64-character
+# MESH_RPC_TOKEN. This is a public repository, so a single `git add -A` would
+# have published it -- which is exactly how a symlink to a home directory and
+# a trust-store path got committed elsewhere in the same estate.
+# `.env.example` stays tracked; it holds keys with no values.
+.env
+.env.*
+!.env.example
