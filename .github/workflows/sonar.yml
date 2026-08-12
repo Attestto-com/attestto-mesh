@@ -1,10 +1,14 @@
 name: SonarCloud Analysis
 
+# Every branch and every pull request. The pull_request trigger was narrower
+# still than the push one -- `[main]` only -- so a PR into develop, the branch
+# this repo actually merges into, ran no job at all and every step below was
+# skipped rather than failed.
 on:
   push:
-    branches: [main, develop]
+    branches: ['**']
   pull_request:
-    branches: [main]
+    branches: ['**']
 
 jobs:
   sonar:
@@ -32,6 +36,14 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      # Seeds a violation of each gate below and requires a non-zero exit.
+      # Every blocker in the 2026-08-11 audit was a control that existed and
+      # had never executed -- in this repo, a lint red on main since 19 May, a
+      # Sonar token expired since April, and 12 specs that belonged to no
+      # TypeScript project. See scripts/gate-self-test.mjs.
+      - name: Gate self-test
+        run: pnpm run gate-self-test
 
       - name: Stub guard
         run: |
