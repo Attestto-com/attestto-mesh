@@ -176,6 +176,14 @@ if (pkg.scripts?.[buildScript]) {
   const buildAt = code.search(runsScript(buildScript))
   if (buildAt >= 0 && testAt >= 0) {
     check(testAt < buildAt, `${workflowPath} builds before it tests; the failure should land on the cheaper step`)
+  } else if (buildAt < 0) {
+    // Say so rather than skip. A check that quietly does not apply is the
+    // shape of every defect this script exists to find: some repos invoke the
+    // bundler directly (`pnpm exec electron-vite build`) instead of the named
+    // script, and the ordering assertion silently evaluated to nothing.
+    notes.push(
+      `test-before-build ordering was NOT checked: ${workflowPath} never invokes \`${buildScript}\` by name`,
+    )
   }
 }
 
