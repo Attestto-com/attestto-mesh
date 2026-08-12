@@ -1,0 +1,26 @@
+{
+  // The root tsconfig.json has `"exclude": ["tests"]`, so before this file the
+  // 12 specs belonged to no TypeScript project at all. Two consequences:
+  //
+  //  - `pnpm type-check` (tsc --noEmit over the root config) never type-checked
+  //    a single test, so a type error inside a spec was invisible.
+  //  - typescript-eslint's project service could not resolve them either, and
+  //    the workaround routed them to the DEFAULT project, which caps at 8
+  //    files. With 12 specs that surfaced as `Parsing error: Too many files`,
+  //    which reads like a linter limit rather than the missing project it was.
+  //
+  // Extending the root keeps one source of truth for compiler options; the two
+  // unused-checks are relaxed because a spec may legitimately bind a value it
+  // only asserts on.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  // `exclude` must be overridden, not inherited. The root's
+  // `"exclude": ["tests"]` is re-based relative to THIS file, becoming
+  // `"../tests"` — which is this directory, so every file matched by `include`
+  // was excluded again and tsc reported "No inputs were found".
+  "exclude": [],
+  "include": ["**/*.ts"]
+}

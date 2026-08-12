@@ -20,14 +20,22 @@ export default tseslint.config(
 
       // General quality
       'no-console': 'warn',
-      'eqeqeq': ['error', 'always'],
+      // `{ null: 'ignore' }` is deliberate. `x != null` is the idiom that
+      // catches null AND undefined in one comparison, which is exactly what
+      // `chat-store.ts`'s `row?.ack_by != null` needs: the optional chain can
+      // produce undefined. Forcing `!== null` there would have made an
+      // unacknowledged row read as acknowledged — the rule as configured was
+      // asking for a behaviour change, not a style fix.
+      'eqeqeq': ['error', 'always', { null: 'ignore' }],
     },
     languageOptions: {
       parserOptions: {
-        projectService: {
-          allowDefaultProject: ['tests/*.ts'],
-          defaultProject: './tsconfig.eslint.json',
-        },
+        // `tsconfig.eslint.json` already includes `tests`, so the project
+        // service resolves them through it. `allowDefaultProject` instead
+        // routed them to the DEFAULT project, which caps at 8 files — with 12
+        // test files that failed as `Parsing error: Too many files`, and the
+        // error looked like a config limit rather than the misrouting it was.
+        projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
